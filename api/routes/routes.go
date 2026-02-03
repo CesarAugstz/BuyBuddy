@@ -14,9 +14,11 @@ func Setup(e *echo.Echo, cfg *config.Config, db *gorm.DB) {
 	userRepo := repository.NewUserRepository(db)
 	receiptRepo := repository.NewReceiptRepository(db)
 	categoryRepo := repository.NewCategoryRepository(db)
+	chatRepo := repository.NewChatRepository(db)
 
 	authHandler := handlers.NewAuthHandler(cfg, userRepo)
 	receiptHandler := handlers.NewReceiptHandler(cfg, receiptRepo, categoryRepo)
+	assistantHandler := handlers.NewAssistantHandler(cfg, receiptRepo, categoryRepo, chatRepo)
 
 	e.GET("/health", handlers.Health)
 
@@ -34,4 +36,9 @@ func Setup(e *echo.Echo, cfg *config.Config, db *gorm.DB) {
 	receipts.GET("", receiptHandler.GetReceipts)
 	receipts.GET("/:id", receiptHandler.GetReceipt)
 	receipts.DELETE("/:id", receiptHandler.DeleteReceipt)
+
+	assistant := api.Group("/assistant")
+	assistant.Use(middleware.AuthMiddleware(cfg.JWTSecret))
+	assistant.POST("/ask", assistantHandler.AskQuestion)
+	assistant.GET("/conversation/:conversationId", assistantHandler.GetConversationHistory)
 }

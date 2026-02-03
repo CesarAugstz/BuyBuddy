@@ -84,12 +84,12 @@ func (h *ReceiptHandler) SaveReceipt(c echo.Context) error {
 	}
 
 	if req.AccessKey != "" {
-		exists, err := h.receiptRepo.ExistsByAccessKey(req.AccessKey)
+		exists, err := h.receiptRepo.ExistsByAccessKey(req.AccessKey, userID)
 		if err != nil {
 			return echo.NewHTTPError(http.StatusInternalServerError, "failed to check for duplicate receipt")
 		}
 		if exists {
-			existing, err := h.receiptRepo.GetByAccessKey(req.AccessKey)
+			existing, err := h.receiptRepo.GetByAccessKey(req.AccessKey, userID)
 			if err == nil {
 				return echo.NewHTTPError(http.StatusConflict, map[string]interface{}{
 					"message": "This receipt has already been saved",

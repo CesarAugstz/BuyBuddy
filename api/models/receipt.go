@@ -75,3 +75,23 @@ type SaveReceiptRequest struct {
 	AccessKey string                   `json:"accessKey,omitempty"`
 	Items     []map[string]interface{} `json:"items" validate:"required"`
 }
+
+type AssistantRequest struct {
+	Question       string `json:"question" validate:"required"`
+	ConversationID string `json:"conversationId,omitempty"`
+}
+
+type AssistantResponse struct {
+	Answer         string `json:"answer"`
+	ConversationID string `json:"conversationId"`
+}
+
+type ChatMessage struct {
+	ID             string         `gorm:"primaryKey;type:uuid;default:gen_random_uuid()" json:"id"`
+	ConversationID string         `gorm:"type:uuid;not null;index" json:"conversationId"`
+	UserID         string         `gorm:"type:uuid;not null;index" json:"userId"`
+	Role           string         `gorm:"not null" json:"role"`
+	Content        string         `gorm:"type:text;not null" json:"content"`
+	CreatedAt      time.Time      `json:"createdAt"`
+	DeletedAt      gorm.DeletedAt `gorm:"index" json:"-"`
+}

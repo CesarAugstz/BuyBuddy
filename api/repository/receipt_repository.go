@@ -43,10 +43,10 @@ func (r *ReceiptRepository) Delete(id string, userID string) error {
 		Delete(&models.Receipt{}).Error
 }
 
-func (r *ReceiptRepository) ExistsByAccessKey(accessKey string) (bool, error) {
+func (r *ReceiptRepository) ExistsByAccessKey(accessKey string, userID string) (bool, error) {
 	var count int64
 	err := r.db.Model(&models.Receipt{}).
-		Where("access_key = ?", accessKey).
+		Where("access_key = ? AND user_id = ?", accessKey, userID).
 		Count(&count).Error
 	if err != nil {
 		return false, err
@@ -54,9 +54,9 @@ func (r *ReceiptRepository) ExistsByAccessKey(accessKey string) (bool, error) {
 	return count > 0, nil
 }
 
-func (r *ReceiptRepository) GetByAccessKey(accessKey string) (*models.Receipt, error) {
+func (r *ReceiptRepository) GetByAccessKey(accessKey string, userID string) (*models.Receipt, error) {
 	var receipt models.Receipt
-	err := r.db.Where("access_key = ?", accessKey).
+	err := r.db.Where("access_key = ? AND user_id = ?", accessKey, userID).
 		Preload("Items").
 		First(&receipt).Error
 	if err != nil {
