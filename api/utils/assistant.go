@@ -2,7 +2,7 @@ package utils
 
 import (
 	"context"
-	"easybuy-api/models"
+	"buybuddy-api/models"
 	"encoding/json"
 	"fmt"
 	"strings"

@@ -1,7 +1,7 @@
 package middleware
 
 import (
-	"easybuy-api/utils"
+	"buybuddy-api/utils"
 	"net/http"
 	"strings"
 

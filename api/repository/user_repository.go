@@ -1,7 +1,7 @@
 package repository
 
 import (
-	"easybuy-api/models"
+	"buybuddy-api/models"
 	"errors"
 	"time"
 

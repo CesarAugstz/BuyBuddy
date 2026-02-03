@@ -1,10 +1,10 @@
 package handlers
 
 import (
-	"easybuy-api/config"
-	"easybuy-api/models"
-	"easybuy-api/repository"
-	"easybuy-api/utils"
+	"buybuddy-api/config"
+	"buybuddy-api/models"
+	"buybuddy-api/repository"
+	"buybuddy-api/utils"
 	"fmt"
 	"net/http"
 

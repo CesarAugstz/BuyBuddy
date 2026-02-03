@@ -8,7 +8,7 @@ dev:
 	air
 
 build:
-	go build -o bin/easybuy-api main.go
+	go build -o bin/buybuddy-api main.go
 
 test:
 	go test ./...
@@ -22,7 +22,7 @@ install:
 	go mod tidy
 
 docker-build:
-	docker build -t easybuy-api .
+	docker build -t buybuddy-api .
 
 docker-run:
-	docker run -p 8080:8080 --env-file .env easybuy-api
+	docker run -p 8080:8080 --env-file .env buybuddy-api

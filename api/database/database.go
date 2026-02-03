@@ -1,7 +1,7 @@
 package database
 
 import (
-	"easybuy-api/config"
+	"buybuddy-api/config"
 	"log"
 
 	"gorm.io/driver/postgres"

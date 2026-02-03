@@ -1,10 +1,10 @@
 package routes
 
 import (
-	"easybuy-api/config"
-	"easybuy-api/handlers"
-	"easybuy-api/middleware"
-	"easybuy-api/repository"
+	"buybuddy-api/config"
+	"buybuddy-api/handlers"
+	"buybuddy-api/middleware"
+	"buybuddy-api/repository"
 
 	"github.com/labstack/echo/v4"
 	"gorm.io/gorm"

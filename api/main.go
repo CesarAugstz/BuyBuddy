@@ -1,12 +1,12 @@
 package main
 
 import (
-	"easybuy-api/config"
-	"easybuy-api/database"
-	"easybuy-api/middleware"
-	"easybuy-api/models"
-	"easybuy-api/repository"
-	"easybuy-api/routes"
+	"buybuddy-api/config"
+	"buybuddy-api/database"
+	"buybuddy-api/middleware"
+	"buybuddy-api/models"
+	"buybuddy-api/repository"
+	"buybuddy-api/routes"
 	"log"
 
 	"github.com/joho/godotenv"
