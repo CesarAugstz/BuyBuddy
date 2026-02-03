@@ -1,0 +1,25 @@
+#!/bin/bash
+echo "=== Getting SHA-1 Certificate Fingerprints ==="
+echo ""
+echo "📱 DEBUG KEYSTORE (for development/testing):"
+echo "---------------------------------------------"
+keytool -list -v -keystore ~/.android/debug.keystore -alias androiddebugkey -storepass android -keypass android 2>/dev/null | grep -E "SHA1:|SHA-1:"
+echo ""
+echo "🔐 RELEASE KEYSTORE (when you have one):"
+echo "---------------------------------------------"
+if [ -f "/home/tyler/dev/projects/easybuy/app/android/app/keystore.jks" ]; then
+    echo "Found keystore, enter your keystore password when prompted:"
+    keytool -list -v -keystore /home/tyler/dev/projects/easybuy/app/android/app/keystore.jks | grep -E "SHA1:|SHA-1:"
+else
+    echo "No release keystore found yet (you'll need this for production)"
+fi
+echo ""
+echo "📋 COPY THE SHA-1 ABOVE AND:"
+echo "1. Go to: https://console.cloud.google.com/apis/credentials"
+echo "2. Select your project"
+echo "3. Click on your OAuth 2.0 Client ID (Android)"
+echo "4. Add the SHA-1 fingerprint"
+echo "5. Save and wait ~5 minutes for changes to propagate"
+echo ""
+echo "📦 Your package name: com.example.flutter_start"
+echo ""
