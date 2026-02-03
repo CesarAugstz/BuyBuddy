@@ -120,13 +120,26 @@ class _ShoppingAssistantPageState extends State<ShoppingAssistantPage> {
       
       _addMessage(response['answer'] ?? 'No response', isUser: false);
     } catch (e) {
-      _addMessage(
+      _addErrorMessage(
         'Sorry, I encountered an error: ${e.toString()}',
-        isUser: false,
+        text,
       );
     } finally {
       setState(() => _isLoading = false);
     }
+  }
+
+  void _addErrorMessage(String errorText, String originalQuestion) {
+    setState(() {
+      _messages.add(ChatMessage(
+        text: errorText,
+        isUser: false,
+        timestamp: DateTime.now(),
+        isError: true,
+        originalQuestion: originalQuestion,
+      ));
+    });
+    _scrollToBottom();
   }
 
   @override
@@ -221,58 +234,88 @@ class _ShoppingAssistantPageState extends State<ShoppingAssistantPage> {
               margin: const EdgeInsets.only(right: 8),
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
-                color: AppTheme.primaryBlue.withOpacity(0.1),
+                color: message.isError
+                    ? Colors.red.withOpacity(0.1)
+                    : AppTheme.primaryBlue.withOpacity(0.1),
                 shape: BoxShape.circle,
               ),
               child: Icon(
-                Icons.smart_toy,
+                message.isError ? Icons.error_outline : Icons.smart_toy,
                 size: 20,
-                color: AppTheme.primaryBlue,
+                color: message.isError ? Colors.red : AppTheme.primaryBlue,
               ),
             ),
           Flexible(
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              decoration: BoxDecoration(
-                color: message.isUser
-                    ? AppTheme.primaryBlue
-                    : AppTheme.lightGray,
-                borderRadius: BorderRadius.circular(20),
-              ),
-              child: message.isUser
-                  ? Text(
-                      message.text,
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 15,
-                      ),
-                    )
-                  : MarkdownBody(
-                      data: message.text,
-                      styleSheet: MarkdownStyleSheet(
-                        p: TextStyle(
-                          color: AppTheme.nearBlack,
-                          fontSize: 15,
+            child: Column(
+              crossAxisAlignment: message.isUser
+                  ? CrossAxisAlignment.end
+                  : CrossAxisAlignment.start,
+              children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  decoration: BoxDecoration(
+                    color: message.isUser
+                        ? AppTheme.primaryBlue
+                        : message.isError
+                            ? Colors.red.shade50
+                            : AppTheme.lightGray,
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: message.isUser
+                      ? Text(
+                          message.text,
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 15,
+                          ),
+                        )
+                      : MarkdownBody(
+                          data: message.text,
+                          styleSheet: MarkdownStyleSheet(
+                            p: TextStyle(
+                              color: message.isError ? Colors.red.shade900 : AppTheme.nearBlack,
+                              fontSize: 15,
+                            ),
+                            strong: TextStyle(
+                              color: AppTheme.nearBlack,
+                              fontWeight: FontWeight.bold,
+                            ),
+                            em: TextStyle(
+                              color: AppTheme.nearBlack,
+                              fontStyle: FontStyle.italic,
+                            ),
+                            code: TextStyle(
+                              backgroundColor: Colors.black12,
+                              fontFamily: 'monospace',
+                              fontSize: 14,
+                            ),
+                            listBullet: TextStyle(
+                              color: AppTheme.nearBlack,
+                              fontSize: 15,
+                            ),
+                          ),
                         ),
-                        strong: TextStyle(
-                          color: AppTheme.nearBlack,
-                          fontWeight: FontWeight.bold,
-                        ),
-                        em: TextStyle(
-                          color: AppTheme.nearBlack,
-                          fontStyle: FontStyle.italic,
-                        ),
-                        code: TextStyle(
-                          backgroundColor: Colors.black12,
-                          fontFamily: 'monospace',
-                          fontSize: 14,
-                        ),
-                        listBullet: TextStyle(
-                          color: AppTheme.nearBlack,
-                          fontSize: 15,
-                        ),
+                ),
+                if (message.isError && message.originalQuestion != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: TextButton.icon(
+                      onPressed: () async {
+                        setState(() {
+                          _messages.remove(message);
+                          _messageController.text = message.originalQuestion!;
+                        });
+                        await Future.delayed(Duration(milliseconds: 100));
+                        _sendMessage();
+                      },
+                      icon: Icon(Icons.refresh, size: 18),
+                      label: Text('Retry'),
+                      style: TextButton.styleFrom(
+                        foregroundColor: AppTheme.primaryBlue,
                       ),
                     ),
+                  ),
+              ],
             ),
           ),
           if (message.isUser)
@@ -296,7 +339,12 @@ class _ShoppingAssistantPageState extends State<ShoppingAssistantPage> {
 
   Widget _buildInputArea() {
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: EdgeInsets.only(
+        left: 16,
+        right: 16,
+        top: 16,
+        bottom: MediaQuery.of(context).padding.bottom + 16,
+      ),
       decoration: BoxDecoration(
         color: Colors.white,
         boxShadow: [
@@ -371,10 +419,14 @@ class ChatMessage {
   final String text;
   final bool isUser;
   final DateTime timestamp;
+  final bool isError;
+  final String? originalQuestion;
 
   ChatMessage({
     required this.text,
     required this.isUser,
     required this.timestamp,
+    this.isError = false,
+    this.originalQuestion,
   });
 }

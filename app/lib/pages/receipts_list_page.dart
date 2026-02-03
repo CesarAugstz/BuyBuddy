@@ -233,6 +233,8 @@ class _ReceiptsListPageState extends State<ReceiptsListPage> {
                             fontWeight: FontWeight.w700,
                             color: AppTheme.nearBlack,
                           ),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
                         ),
                         const SizedBox(height: 4),
                         Text(
@@ -316,12 +318,16 @@ class _ReceiptsListPageState extends State<ReceiptsListPage> {
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text(
-                    receipt['company'] ?? 'Receipt Details',
-                    style: TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.w700,
-                      color: AppTheme.nearBlack,
+                  Expanded(
+                    child: Text(
+                      receipt['company'] ?? 'Receipt Details',
+                      style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.w700,
+                        color: AppTheme.nearBlack,
+                      ),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
                     ),
                   ),
                   IconButton(

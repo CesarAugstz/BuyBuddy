@@ -72,28 +72,24 @@ class MainPage extends StatelessWidget {
               ),
             ),
             ListTile(
-              leading: Icon(Icons.dashboard_outlined, color: AppTheme.darkGray),
-              title: Text('Option 1'),
+              leading: Icon(Icons.receipt_long_outlined, color: AppTheme.darkGray),
+              title: Text('My Receipts'),
               onTap: () {
                 Navigator.pop(context);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text('Option 1 selected'),
-                    backgroundColor: AppTheme.nearBlack,
-                  ),
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (context) => const ReceiptsPage()),
                 );
               },
             ),
             ListTile(
-              leading: Icon(Icons.settings_outlined, color: AppTheme.darkGray),
-              title: Text('Option 2'),
+              leading: Icon(Icons.chat_bubble_outline, color: AppTheme.darkGray),
+              title: Text('Shopping Assistant'),
               onTap: () {
                 Navigator.pop(context);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text('Option 2 selected'),
-                    backgroundColor: AppTheme.nearBlack,
-                  ),
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (context) => const ShoppingAssistantPage()),
                 );
               },
             ),
