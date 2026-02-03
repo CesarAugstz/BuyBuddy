@@ -3,6 +3,7 @@ import '../services/auth_service.dart';
 import '../config/theme.dart';
 import 'receipts_page.dart';
 import 'shopping_assistant_page.dart';
+import 'model_settings_page.dart';
 
 class MainPage extends StatelessWidget {
   final AuthService _authService = AuthService();
@@ -90,6 +91,17 @@ class MainPage extends StatelessWidget {
                 Navigator.push(
                   context,
                   MaterialPageRoute(builder: (context) => const ShoppingAssistantPage()),
+                );
+              },
+            ),
+            ListTile(
+              leading: Icon(Icons.settings_outlined, color: AppTheme.darkGray),
+              title: Text('AI Model Settings'),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (context) => const ModelSettingsPage()),
                 );
               },
             ),

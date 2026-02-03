@@ -6,8 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/google/generative-ai-go/genai"
-	"google.golang.org/api/option"
+	"google.golang.org/genai"
 )
 
 type ReceiptData struct {
@@ -28,14 +27,17 @@ type ItemMapping struct {
 	Name    string
 }
 
-func ProcessReceiptWithGemini(ctx context.Context, imageData []byte, apiKey string, categories []CategoryInfo, itemMappings []ItemMapping) (*ReceiptData, error) {
-	client, err := genai.NewClient(ctx, option.WithAPIKey(apiKey))
+func ProcessReceiptWithGemini(ctx context.Context, imageData []byte, apiKey string, categories []CategoryInfo, itemMappings []ItemMapping, modelName string) (*ReceiptData, error) {
+	client, err := genai.NewClient(ctx, &genai.ClientConfig{
+		APIKey: apiKey,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create Gemini client: %w", err)
 	}
-	defer client.Close()
 
-	model := client.GenerativeModel("gemini-2.5-flash")
+	if modelName == "" {
+		modelName = "gemini-2.5-flash"
+	}
 
 	categoriesText := buildCategoriesText(categories)
 	itemMappingsText := buildItemMappingsText(itemMappings)
@@ -112,12 +114,18 @@ CRITICAL: If you cannot extract the required fields (rawName, nameOptions and to
 
 	fmt.Println("Prompt: %s", prompt)
 
-	parts := []genai.Part{
-		genai.Text(prompt),
-		genai.ImageData("jpeg", imageData),
-	}
-
-	resp, err := model.GenerateContent(ctx, parts...)
+	resp, err := client.Models.GenerateContent(ctx, modelName, []*genai.Content{
+		{
+			Role: "user",
+			Parts: []*genai.Part{
+				{Text: prompt},
+				{InlineData: &genai.Blob{
+					MIMEType: "image/jpeg",
+					Data:     imageData,
+				}},
+			},
+		},
+	}, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate content: %w", err)
 	}
@@ -126,12 +134,12 @@ CRITICAL: If you cannot extract the required fields (rawName, nameOptions and to
 		return nil, fmt.Errorf("no response from Gemini")
 	}
 
-	textPart, ok := resp.Candidates[0].Content.Parts[0].(genai.Text)
-	if !ok {
+	textPart := resp.Candidates[0].Content.Parts[0]
+	if textPart.Text == "" {
 		return nil, fmt.Errorf("unexpected response format from Gemini")
 	}
 
-	responseText := string(textPart)
+	responseText := textPart.Text
 
 	var result struct {
 		Error     string                   `json:"error"`

@@ -25,7 +25,7 @@ func main() {
 		log.Fatal("Failed to connect to database:", err)
 	}
 
-	if err := database.Migrate(&models.User{}, &models.Session{}, &models.Category{}, &models.Subcategory{}, &models.Receipt{}, &models.ReceiptItem{}, &models.ChatMessage{}); err != nil {
+	if err := database.Migrate(&models.User{}, &models.Session{}, &models.Category{}, &models.Subcategory{}, &models.Receipt{}, &models.ReceiptItem{}, &models.ChatMessage{}, &models.UserPreferences{}); err != nil {
 		log.Fatal("Failed to migrate database:", err)
 	}
 

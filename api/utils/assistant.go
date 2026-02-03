@@ -5,20 +5,50 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"strings"
 
-	"github.com/google/generative-ai-go/genai"
-	"google.golang.org/api/option"
+	"google.golang.org/genai"
 )
 
-func AskShoppingAssistant(ctx context.Context, question string, receipts []models.Receipt, conversationHistory []models.ChatMessage, apiKey string) (string, error) {
-	client, err := genai.NewClient(ctx, option.WithAPIKey(apiKey))
+func AskShoppingAssistant(ctx context.Context, question string, receipts []models.Receipt, conversationHistory []models.ChatMessage, apiKey string, modelName string) (string, error) {
+	client, err := genai.NewClient(ctx, &genai.ClientConfig{
+		APIKey: apiKey,
+	})
 	if err != nil {
 		return "", fmt.Errorf("failed to create Gemini client: %w", err)
 	}
-	defer client.Close()
 
-	model := client.GenerativeModel("gemini-1.5-flash-8b")
+	if modelName == "" {
+		modelName = "gemini-2.5-flash-lite"
+	}
+
+	fmt.Printf("Using assistant model: %s\n", modelName)
+
+	models, err := client.Models.List(ctx, &genai.ListModelsConfig{})
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	fmt.Println("List of models that support generateContent:")
+	for _, m := range models.Items {
+		for _, action := range m.SupportedActions {
+			if action == "generateContent" {
+				fmt.Println(m.Name)
+				break
+			}
+		}
+	}
+
+	fmt.Println("\nList of models that support embedContent:")
+	for _, m := range models.Items {
+		for _, action := range m.SupportedActions {
+			if action == "embedContent" {
+				fmt.Println(m.Name)
+				break
+			}
+		}
+	}
 
 	receiptsJSON, err := json.MarshalIndent(receipts, "", "  ")
 	if err != nil {
@@ -69,7 +99,14 @@ WHEN PROVIDING PRODUCT HISTORY:
 Provide the answer in a friendly, natural way. Keep it concise but informative.
 Always respond in the same language as the user's question.`, string(receiptsJSON), conversationContext.String(), question)
 
-	resp, err := model.GenerateContent(ctx, genai.Text(prompt))
+	resp, err := client.Models.GenerateContent(ctx, modelName, []*genai.Content{
+		{
+			Role: "user",
+			Parts: []*genai.Part{
+				{Text: prompt},
+			},
+		},
+	}, nil)
 	if err != nil {
 		return "", fmt.Errorf("failed to generate content: %w", err)
 	}
@@ -78,10 +115,10 @@ Always respond in the same language as the user's question.`, string(receiptsJSO
 		return "I'm sorry, I couldn't find an answer to your question.", nil
 	}
 
-	textPart, ok := resp.Candidates[0].Content.Parts[0].(genai.Text)
-	if !ok {
+	textPart := resp.Candidates[0].Content.Parts[0]
+	if textPart.Text == "" {
 		return "I'm sorry, I couldn't process your request.", nil
 	}
 
-	return string(textPart), nil
+	return textPart.Text, nil
 }

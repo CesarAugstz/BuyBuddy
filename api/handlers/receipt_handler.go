@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"buybuddy-api/config"
+	"buybuddy-api/database"
 	"buybuddy-api/models"
 	"buybuddy-api/repository"
 	"buybuddy-api/utils"
@@ -78,7 +79,14 @@ func (h *ReceiptHandler) ProcessReceipt(c echo.Context) error {
 		}
 	}
 
-	receiptData, err := utils.ProcessReceiptWithGemini(c.Request().Context(), imageData, geminiKey, categoryInfos, itemMappings)
+	var prefs models.UserPreferences
+	database.DB.Where("user_id = ?", userID).First(&prefs)
+	receiptModel := prefs.ReceiptModel
+	if receiptModel == "" {
+		receiptModel = "gemini-2.5-flash"
+	}
+
+	receiptData, err := utils.ProcessReceiptWithGemini(c.Request().Context(), imageData, geminiKey, categoryInfos, itemMappings, receiptModel)
 	if err != nil {
 		fmt.Println("Gemini processing error:", err)
 		return echo.NewHTTPError(http.StatusBadRequest, map[string]string{

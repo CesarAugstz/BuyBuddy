@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"buybuddy-api/config"
+	"buybuddy-api/database"
 	"buybuddy-api/models"
 	"buybuddy-api/repository"
 	"buybuddy-api/utils"
@@ -55,7 +56,14 @@ func (h *AssistantHandler) AskQuestion(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to fetch receipts")
 	}
 
-	answer, err := utils.AskShoppingAssistant(c.Request().Context(), req.Question, receipts, conversationHistory, h.cfg.GeminiAPIKey)
+	var prefs models.UserPreferences
+	database.DB.Where("user_id = ?", userID).First(&prefs)
+	assistantModel := prefs.AssistantModel
+	if assistantModel == "" {
+		assistantModel = "gemini-2.5-flash-lite"
+	}
+
+	answer, err := utils.AskShoppingAssistant(c.Request().Context(), req.Question, receipts, conversationHistory, h.cfg.GeminiAPIKey, assistantModel)
 	if err != nil {
 		fmt.Println("Assistant error:", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, map[string]string{
