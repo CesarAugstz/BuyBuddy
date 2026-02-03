@@ -1,0 +1,91 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Start Go API",
+      "type": "shell",
+      "command": "cd ${workspaceFolder}/api && go run main.go",
+      "isBackground": true,
+      "problemMatcher": {
+        "pattern": {
+          "regexp": "^(.*)$",
+          "file": 1,
+          "location": 2,
+          "message": 3
+        },
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": ".*",
+          "endsPattern": ".*Server started on.*"
+        }
+      },
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "focus": false,
+        "panel": "dedicated",
+        "showReuseMessage": false,
+        "clear": false,
+        "close": false,
+        "group": "dev"
+      },
+      "runOptions": {
+        "instanceLimit": 1,
+        "reevaluateOnRerun": true
+      }
+    },
+    {
+      "label": "Start Flutter on Phone",
+      "type": "shell",
+      "command": "export JAVA_HOME=/usr/lib/jvm/java-21-openjdk && export PATH=$JAVA_HOME/bin:$PATH && export GRADLE_OPTS=\"-Dorg.gradle.java.home=$JAVA_HOME\" && cd ${workspaceFolder}/app && flutter run -d SWNZ6PGIAMDYYHX4",
+      "isBackground": true,
+      "problemMatcher": {
+        "pattern": {
+          "regexp": "^(.*)$",
+          "file": 1,
+          "location": 2,
+          "message": 3
+        },
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": ".*Launching.*",
+          "endsPattern": ".*Application finished.*"
+        }
+      },
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "focus": false,
+        "panel": "dedicated",
+        "showReuseMessage": false,
+        "clear": false,
+        "close": false,
+        "group": "dev"
+      },
+      "runOptions": {
+        "instanceLimit": 1,
+        "reevaluateOnRerun": true
+      }
+    },
+    {
+      "label": "Start All Dev Servers",
+      "dependsOn": [
+        "Start Go API",
+        "Start Flutter on Phone"
+      ],
+      "problemMatcher": [],
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "focus": false,
+        "panel": "dedicated",
+        "showReuseMessage": false,
+        "clear": false,
+        "close": false
+      },
+      "runOptions": {
+        "instanceLimit": 1
+      }
+    }
+  ]
+}

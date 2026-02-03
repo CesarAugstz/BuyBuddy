@@ -18,7 +18,7 @@ func AskShoppingAssistant(ctx context.Context, question string, receipts []model
 	}
 	defer client.Close()
 
-	model := client.GenerativeModel("gemini-3-flash-preview")
+	model := client.GenerativeModel("gemini-2.5-flash-lite")
 
 	receiptsJSON, err := json.MarshalIndent(receipts, "", "  ")
 	if err != nil {

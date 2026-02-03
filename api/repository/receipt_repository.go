@@ -21,7 +21,8 @@ func (r *ReceiptRepository) Create(receipt *models.Receipt) error {
 func (r *ReceiptRepository) GetByUserID(userID string) ([]models.Receipt, error) {
 	var receipts []models.Receipt
 	err := r.db.Where("user_id = ?", userID).
-		Preload("Items").
+		Preload("Items.Category").
+		Preload("Items.Subcategory").
 		Order("created_at DESC").
 		Find(&receipts).Error
 	return receipts, err
@@ -30,7 +31,8 @@ func (r *ReceiptRepository) GetByUserID(userID string) ([]models.Receipt, error)
 func (r *ReceiptRepository) GetByID(id string, userID string) (*models.Receipt, error) {
 	var receipt models.Receipt
 	err := r.db.Where("id = ? AND user_id = ?", id, userID).
-		Preload("Items").
+		Preload("Items.Category").
+		Preload("Items.Subcategory").
 		First(&receipt).Error
 	if err != nil {
 		return nil, err
@@ -57,7 +59,8 @@ func (r *ReceiptRepository) ExistsByAccessKey(accessKey string, userID string) (
 func (r *ReceiptRepository) GetByAccessKey(accessKey string, userID string) (*models.Receipt, error) {
 	var receipt models.Receipt
 	err := r.db.Where("access_key = ? AND user_id = ?", accessKey, userID).
-		Preload("Items").
+		Preload("Items.Category").
+		Preload("Items.Subcategory").
 		First(&receipt).Error
 	if err != nil {
 		return nil, err

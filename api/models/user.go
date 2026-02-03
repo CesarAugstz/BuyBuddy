@@ -34,6 +34,7 @@ type LoginResponse struct {
 type Session struct {
 	ID        uint           `gorm:"primaryKey" json:"id"`
 	UserID    string         `gorm:"type:uuid;not null;index" json:"userId"`
+	User      *User          `gorm:"foreignKey:UserID;references:ID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE" json:"-"`
 	Token     string         `gorm:"uniqueIndex;not null" json:"token"`
 	ExpiresAt time.Time      `gorm:"not null;default:NOW() + INTERVAL '7 days'" json:"expiresAt"`
 	CreatedAt time.Time      `json:"createdAt"`

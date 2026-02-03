@@ -29,7 +29,7 @@ func ProcessReceiptWithGemini(ctx context.Context, imageData []byte, apiKey stri
 	}
 	defer client.Close()
 
-	model := client.GenerativeModel("gemini-3-flash-preview")
+	model := client.GenerativeModel("gemini-2.5-flash")
 
 	categoriesText := buildCategoriesText(categories)
 
