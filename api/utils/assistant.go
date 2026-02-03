@@ -1,8 +1,8 @@
 package utils
 
 import (
-	"context"
 	"buybuddy-api/models"
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -18,7 +18,7 @@ func AskShoppingAssistant(ctx context.Context, question string, receipts []model
 	}
 	defer client.Close()
 
-	model := client.GenerativeModel("gemini-2.0-flash")
+	model := client.GenerativeModel("gemini-1.5-flash-8b")
 
 	receiptsJSON, err := json.MarshalIndent(receipts, "", "  ")
 	if err != nil {
