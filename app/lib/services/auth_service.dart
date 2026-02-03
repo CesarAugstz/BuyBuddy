@@ -124,10 +124,6 @@ class AuthService {
       final idToken = googleAuth.idToken;
       final accessToken = googleAuth.accessToken;
 
-      print('GoogleSignInAccount: ${account.toString()}');
-      print('ID Token: $idToken');
-      print('Access Token: $accessToken');
-
       final apiToken = await _sendTokenToBackend(idToken, accessToken, account);
 
       if (apiToken == null) {
