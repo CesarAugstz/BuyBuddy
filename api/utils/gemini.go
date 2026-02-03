@@ -12,6 +12,7 @@ import (
 
 type ReceiptData struct {
 	Company   string                   `json:"company"`
+	Date      string                   `json:"date"`
 	Total     float64                  `json:"total"`
 	AccessKey string                   `json:"accessKey"`
 	Items     []map[string]interface{} `json:"items"`
@@ -22,7 +23,12 @@ type CategoryInfo struct {
 	Subcategories []string
 }
 
-func ProcessReceiptWithGemini(ctx context.Context, imageData []byte, apiKey string, categories []CategoryInfo) (*ReceiptData, error) {
+type ItemMapping struct {
+	RawName string
+	Name    string
+}
+
+func ProcessReceiptWithGemini(ctx context.Context, imageData []byte, apiKey string, categories []CategoryInfo, itemMappings []ItemMapping) (*ReceiptData, error) {
 	client, err := genai.NewClient(ctx, option.WithAPIKey(apiKey))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create Gemini client: %w", err)
@@ -32,60 +38,77 @@ func ProcessReceiptWithGemini(ctx context.Context, imageData []byte, apiKey stri
 	model := client.GenerativeModel("gemini-2.5-flash")
 
 	categoriesText := buildCategoriesText(categories)
+	itemMappingsText := buildItemMappingsText(itemMappings)
 
-	prompt := fmt.Sprintf(`You are an AI specialized in reading Brazilian receipts (notas fiscais).
-Analyze this receipt image and extract the following information:
-1. Company/Store name
-2. Total amount
-3. Access Key (Chave de Acesso) - a 44-digit numeric code found on NFe receipts
-4. List of items with detailed information
+	prompt := fmt.Sprintf(`Você é uma IA especializada em ler notas fiscais brasileiras.
+Analise esta imagem de nota fiscal e extraia as seguintes informações:
+1. Nome da empresa/loja
+2. Data e hora da compra
+3. Valor total
+4. Chave de Acesso - um código numérico de 44 dígitos encontrado em NFe
+5. Lista de itens com informações detalhadas
 
-IMPORTANT RULES:
-- Only extract information that you can clearly read from the receipt
-- If you cannot read or identify any field, return null for that field
-- Do NOT make up or imagine any information
-- For items, only include items you can clearly see
-- Prices should be in decimal format (e.g., 10.50)
-- The Access Key is a 44-digit code, usually labeled as "Chave de Acesso" or shown as a barcode number
+REGRAS IMPORTANTES:
+- Extraia apenas informações que você consegue ler claramente da nota fiscal
+- Se não conseguir ler ou identificar algum campo, retorne null para esse campo
+- NÃO invente ou imagine nenhuma informação
+- Para itens, inclua apenas os que você consegue ver claramente
+- Preços devem estar em formato decimal (ex: 10.50)
+- Data deve estar no formato ISO 8601: "YYYY-MM-DDTHH:MM:SS" (ex: "2024-03-15T14:30:00")
+- A Chave de Acesso é um código de 44 dígitos, geralmente rotulado como "Chave de Acesso" ou mostrado como número de código de barras
 
-For each item, you MUST extract at minimum:
-- name: Product name (REQUIRED)
-- totalPrice: Total price for this item (REQUIRED)
+Para cada item, você DEVE extrair no mínimo:
+- rawName: O nome EXATO do produto como escrito na nota fiscal, incluindo abreviações (OBRIGATÓRIO)
+- nameOptions: Um array de 1-3 versões MELHORADAS e legíveis do nome do produto - expanda abreviações, corrija erros, deixe claro. A primeira opção deve ser a mais provável, seguida de alternativas se aplicável (OBRIGATÓRIO)
+- totalPrice: Preço total deste item (OBRIGATÓRIO)
 
-Additionally, extract if visible:
-- brand: Brand name (if visible, otherwise null)
-- quantity: Numeric quantity
-- unit: Unit of measure ("kg", "un", "L", "g", "ml", "cx" for box, etc.)
-- unitPrice: Price per unit (if visible, calculate from total/quantity if needed)
-- category: Main category - MUST be one of the following categories
-- subcategory: Subcategory - MUST be one of the subcategories for the chosen category
+Adicionalmente, extraia se visível:
+- brand: Nome da marca (se visível, caso contrário null)
+- quantity: Quantidade numérica
+- unit: Unidade de medida ("kg", "un", "L", "g", "ml", "cx" para caixa, etc.)
+- unitPrice: Preço por unidade (se visível, calcule a partir de total/quantidade se necessário)
+- categoryOptions: Array de 1-2 possíveis categorias com suas subcategorias em PORTUGUÊS. A primeira deve ser a mais provável. Formato: [{"category": "Alimentos", "subcategory": "Laticínios"}]
 
-AVAILABLE CATEGORIES AND SUBCATEGORIES:
+EXEMPLOS DE MELHORIA DE NOME DE PRODUTO:
+- rawName: "LT UHT ITAMBE" → nameOptions: ["Leite UHT Itambé"]
+- rawName: "ARROZ TIPO 1" → nameOptions: ["Arroz Tipo 1", "Arroz Branco Tipo 1"]
+- rawName: "FGO PRETO" → nameOptions: ["Feijão Preto"]
+- rawName: "CAFE PILAO" → nameOptions: ["Café Pilão", "Café em Pó Pilão"]
+- rawName: "REFRIGERANTE COCA" → nameOptions: ["Refrigerante Coca-Cola", "Coca-Cola"]
+- rawName: "QJO MINAS" → nameOptions: ["Queijo Minas", "Queijo Minas Frescal"]
+
 %s
 
-Return the data in this exact JSON format:
+CATEGORIAS E SUBCATEGORIAS DISPONÍVEIS (EM PORTUGUÊS):
+%s
+
+Retorne os dados neste formato JSON exato:
 {
   "company": "Company Name or null",
+  "date": "2024-03-15T14:30:00 or null",
   "total": 0.00 or null,
   "accessKey": "44-digit number or null",
   "items": [
     {
-      "name": "Item Name",
-      "brand": "Brand Name or null",
+      "rawName": "LT UHT ITAMBE",
+      "nameOptions": ["Leite UHT Itambé", "Leite Longa Vida Itambé"],
+      "brand": "Itambé",
       "quantity": 1.0,
       "unit": "un",
       "unitPrice": 0.00,
       "totalPrice": 0.00,
-      "category": "Food",
-      "subcategory": "Meat"
+      "categoryOptions": [
+        {"category": "Laticínios", "subcategory": "Leite"},
+        {"category": "Bebidas", "subcategory": "Leite"}
+      ]
     }
   ]
 }
 
-CRITICAL: If you cannot extract the required fields (name and totalPrice) for any items, return an error:
+CRITICAL: If you cannot extract the required fields (rawName, nameOptions and totalPrice) for any items, return an error:
 {
   "error": "Could not extract required item information (name and price) from the receipt"
-}`, categoriesText)
+}`, itemMappingsText, categoriesText)
 
 	fmt.Println("Prompt: %s", prompt)
 
@@ -187,5 +210,30 @@ func buildCategoriesText(categories []CategoryInfo) string {
 		}
 	}
 
+	return builder.String()
+}
+
+func buildItemMappingsText(mappings []ItemMapping) string {
+	if len(mappings) == 0 {
+		return ""
+	}
+
+	var builder strings.Builder
+	builder.WriteString("MAPEAMENTOS APRENDIDOS DE NOTAS FISCAIS ANTERIORES DO USUÁRIO:\n")
+	builder.WriteString("Use estes mapeamentos para melhorar os nomes dos produtos quando o rawName for similar:\n\n")
+
+	// Deduplicate mappings
+	seen := make(map[string]string)
+	for _, mapping := range mappings {
+		if mapping.RawName != "" && mapping.Name != "" && mapping.RawName != mapping.Name {
+			seen[mapping.RawName] = mapping.Name
+		}
+	}
+
+	for rawName, improvedName := range seen {
+		builder.WriteString(fmt.Sprintf("- \"%s\" → \"%s\"\n", rawName, improvedName))
+	}
+
+	builder.WriteString("\n")
 	return builder.String()
 }

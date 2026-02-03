@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/labstack/echo/v4"
 )
@@ -61,7 +62,23 @@ func (h *ReceiptHandler) ProcessReceipt(c echo.Context) error {
 		}
 	}
 
-	receiptData, err := utils.ProcessReceiptWithGemini(c.Request().Context(), imageData, geminiKey, categoryInfos)
+	// Get user's previous receipt items for learning
+	receipts, err := h.receiptRepo.GetByUserID(userID)
+	if err != nil {
+		receipts = []models.Receipt{} // Continue even if we can't get history
+	}
+
+	itemMappings := make([]utils.ItemMapping, 0)
+	for _, receipt := range receipts {
+		for _, item := range receipt.Items {
+			itemMappings = append(itemMappings, utils.ItemMapping{
+				RawName: item.RawName,
+				Name:    item.Name,
+			})
+		}
+	}
+
+	receiptData, err := utils.ProcessReceiptWithGemini(c.Request().Context(), imageData, geminiKey, categoryInfos, itemMappings)
 	if err != nil {
 		fmt.Println("Gemini processing error:", err)
 		return echo.NewHTTPError(http.StatusBadRequest, map[string]string{
@@ -108,9 +125,36 @@ func (h *ReceiptHandler) SaveReceipt(c echo.Context) error {
 		Items:     []models.ReceiptItem{},
 	}
 
+	if req.Date != "" {
+		if parsedDate, err := time.Parse(time.RFC3339, req.Date); err == nil {
+			receipt.Date = &parsedDate
+		}
+	}
+
 	for _, item := range req.Items {
+		rawName := getStringFromMap(item, "rawName")
+
+		var name string
+		if customName := getStringFromMap(item, "customName"); customName != "" {
+			name = customName
+		} else if itemName := getStringFromMap(item, "name"); itemName != "" {
+			name = itemName
+		} else if nameOptions, ok := item["nameOptions"].([]interface{}); ok && len(nameOptions) > 0 {
+			if firstOption, ok := nameOptions[0].(string); ok {
+				name = firstOption
+			}
+		}
+
+		if rawName == "" {
+			rawName = name
+		}
+		if name == "" {
+			name = rawName
+		}
+
 		receiptItem := models.ReceiptItem{
-			Name:       getStringFromMap(item, "name"),
+			RawName:    rawName,
+			Name:       name,
 			Brand:      getStringFromMap(item, "brand"),
 			Quantity:   getFloatFromMap(item, "quantity", 1.0),
 			Unit:       getStringFromMap(item, "unit"),
@@ -123,8 +167,22 @@ func (h *ReceiptHandler) SaveReceipt(c echo.Context) error {
 			receiptItem.Unit = "un"
 		}
 
-		categoryName := getStringFromMap(item, "category")
-		subcategoryName := getStringFromMap(item, "subcategory")
+		// Try to get category from categoryOptions array (first option)
+		categoryName := ""
+		subcategoryName := ""
+
+		if categoryOptions, ok := item["categoryOptions"].([]interface{}); ok && len(categoryOptions) > 0 {
+			if firstCatOption, ok := categoryOptions[0].(map[string]interface{}); ok {
+				categoryName = getStringFromMap(firstCatOption, "category")
+				subcategoryName = getStringFromMap(firstCatOption, "subcategory")
+			}
+		}
+
+		// Fallback to old format if categoryOptions not found
+		if categoryName == "" {
+			categoryName = getStringFromMap(item, "category")
+			subcategoryName = getStringFromMap(item, "subcategory")
+		}
 
 		if categoryName != "" {
 			category, err := h.categoryRepo.GetByName(categoryName)

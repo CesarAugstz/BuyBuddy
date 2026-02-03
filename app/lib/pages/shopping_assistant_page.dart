@@ -118,7 +118,15 @@ class _ShoppingAssistantPageState extends State<ShoppingAssistantPage> {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString('last_conversation_id', _conversationId ?? '');
       
-      _addMessage(response['answer'] ?? 'No response', isUser: false);
+      final answer = response['answer'] ?? 'No response';
+      
+      if (answer.toLowerCase().contains('error') || 
+          answer.toLowerCase().contains('failed') ||
+          answer.toLowerCase().contains('please log in')) {
+        _addErrorMessage(answer, text);
+      } else {
+        _addMessage(answer, isUser: false);
+      }
     } catch (e) {
       _addErrorMessage(
         'Sorry, I encountered an error: ${e.toString()}',

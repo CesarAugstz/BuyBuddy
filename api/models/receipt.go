@@ -11,6 +11,7 @@ type Receipt struct {
 	UserID    string         `gorm:"type:uuid;not null;index" json:"userId"`
 	User      *User          `gorm:"foreignKey:UserID;references:ID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE" json:"user,omitempty"`
 	Company   string         `gorm:"not null" json:"company"`
+	Date      *time.Time     `json:"date,omitempty"`
 	Total     float64        `gorm:"not null" json:"total"`
 	AccessKey string         `gorm:"uniqueIndex;size:44" json:"accessKey,omitempty"`
 	ImageURL  string         `json:"imageUrl,omitempty"`
@@ -24,6 +25,7 @@ type ReceiptItem struct {
 	ID            uint           `gorm:"primaryKey" json:"id"`
 	ReceiptID     string         `gorm:"type:uuid;not null;index" json:"receiptId"`
 	Receipt       *Receipt       `gorm:"foreignKey:ReceiptID;references:ID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE" json:"-"`
+	RawName       string         `gorm:"not null" json:"rawName"`
 	Name          string         `gorm:"not null" json:"name"`
 	Brand         string         `json:"brand,omitempty"`
 	Quantity      float64        `gorm:"not null;default:1" json:"quantity"`
@@ -67,6 +69,7 @@ type ProcessReceiptRequest struct {
 
 type ProcessReceiptResponse struct {
 	Company   string                   `json:"company"`
+	Date      string                   `json:"date,omitempty"`
 	Total     float64                  `json:"total"`
 	AccessKey string                   `json:"accessKey,omitempty"`
 	Items     []map[string]interface{} `json:"items"`
@@ -74,6 +77,7 @@ type ProcessReceiptResponse struct {
 
 type SaveReceiptRequest struct {
 	Company   string                   `json:"company" validate:"required"`
+	Date      string                   `json:"date,omitempty"`
 	Total     float64                  `json:"total" validate:"required"`
 	AccessKey string                   `json:"accessKey,omitempty"`
 	Items     []map[string]interface{} `json:"items" validate:"required"`
