@@ -20,15 +20,6 @@ func (r *CategoryRepository) GetAll() ([]models.Category, error) {
 	return categories, err
 }
 
-func (r *CategoryRepository) GetByID(id uint) (*models.Category, error) {
-	var category models.Category
-	err := r.db.Preload("Subcategories").First(&category, id).Error
-	if err != nil {
-		return nil, err
-	}
-	return &category, nil
-}
-
 func (r *CategoryRepository) GetByName(name string) (*models.Category, error) {
 	var category models.Category
 	err := r.db.Where("name = ?", name).First(&category).Error
@@ -38,10 +29,6 @@ func (r *CategoryRepository) GetByName(name string) (*models.Category, error) {
 	return &category, nil
 }
 
-func (r *CategoryRepository) Create(category *models.Category) error {
-	return r.db.Create(category).Error
-}
-
 func (r *CategoryRepository) GetSubcategoryByName(categoryID uint, name string) (*models.Subcategory, error) {
 	var subcategory models.Subcategory
 	err := r.db.Where("category_id = ? AND name = ?", categoryID, name).First(&subcategory).Error
@@ -49,10 +36,6 @@ func (r *CategoryRepository) GetSubcategoryByName(categoryID uint, name string) 
 		return nil, err
 	}
 	return &subcategory, nil
-}
-
-func (r *CategoryRepository) CreateSubcategory(subcategory *models.Subcategory) error {
-	return r.db.Create(subcategory).Error
 }
 
 func (r *CategoryRepository) SeedDefaultCategories() error {

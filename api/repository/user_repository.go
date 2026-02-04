@@ -8,6 +8,8 @@ import (
 	"gorm.io/gorm"
 )
 
+const SessionDuration = 7 * 24 * time.Hour
+
 type UserRepository struct {
 	db *gorm.DB
 }
@@ -61,24 +63,11 @@ func (r *UserRepository) GetUserByID(userID string) (*models.User, error) {
 	return &user, nil
 }
 
-func (r *UserRepository) GetUserByEmail(email string) (*models.User, error) {
-	var user models.User
-
-	if err := r.db.Where("email = ?", email).First(&user).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, errors.New("user not found")
-		}
-		return nil, err
-	}
-
-	return &user, nil
-}
-
 func (r *UserRepository) CreateSession(userID, token string) error {
 	session := models.Session{
 		UserID:    userID,
 		Token:     token,
-		ExpiresAt: time.Now().Add(7 * 24 * time.Hour),
+		ExpiresAt: time.Now().Add(SessionDuration),
 	}
 
 	return r.db.Create(&session).Error
@@ -86,23 +75,4 @@ func (r *UserRepository) CreateSession(userID, token string) error {
 
 func (r *UserRepository) DeleteSession(token string) error {
 	return r.db.Where("token = ?", token).Delete(&models.Session{}).Error
-}
-
-func (r *UserRepository) ValidateSession(token string) bool {
-	var count int64
-	r.db.Model(&models.Session{}).Where("token = ?", token).Count(&count)
-	return count > 0
-}
-
-func (r *UserRepository) GetUserByToken(token string) (*models.User, error) {
-	var session models.Session
-
-	if err := r.db.Where("token = ?", token).First(&session).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, errors.New("session not found")
-		}
-		return nil, err
-	}
-
-	return r.GetUserByID(session.UserID)
 }

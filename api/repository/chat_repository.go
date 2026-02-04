@@ -25,8 +25,3 @@ func (r *ChatRepository) GetConversationHistory(conversationID string, userID st
 		Find(&messages).Error
 	return messages, err
 }
-
-func (r *ChatRepository) DeleteConversation(conversationID string, userID string) error {
-	return r.db.Where("conversation_id = ? AND user_id = ?", conversationID, userID).
-		Delete(&models.ChatMessage{}).Error
-}

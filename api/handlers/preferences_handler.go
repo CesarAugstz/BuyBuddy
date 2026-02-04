@@ -1,34 +1,27 @@
 package handlers
 
 import (
-	"buybuddy-api/database"
 	"buybuddy-api/models"
+	"buybuddy-api/repository"
 	"net/http"
 
 	"github.com/labstack/echo/v4"
 )
 
-type PreferencesHandler struct{}
+type PreferencesHandler struct {
+	prefsRepo *repository.PreferencesRepository
+}
 
-func NewPreferencesHandler() *PreferencesHandler {
-	return &PreferencesHandler{}
+func NewPreferencesHandler(prefsRepo *repository.PreferencesRepository) *PreferencesHandler {
+	return &PreferencesHandler{prefsRepo: prefsRepo}
 }
 
 func (h *PreferencesHandler) GetPreferences(c echo.Context) error {
 	userID := c.Get("userID").(string)
 
-	var prefs models.UserPreferences
-	result := database.DB.Where("user_id = ?", userID).First(&prefs)
-
-	if result.Error != nil {
-		prefs = models.UserPreferences{
-			UserID:         userID,
-			ReceiptModel:   "gemini-2.5-flash",
-			AssistantModel: "gemini-2.5-flash-lite",
-		}
-		if err := database.DB.Create(&prefs).Error; err != nil {
-			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Failed to create preferences"})
-		}
+	prefs, err := h.prefsRepo.GetOrCreate(userID)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Failed to get preferences"})
 	}
 
 	return c.JSON(http.StatusOK, prefs)
@@ -42,28 +35,20 @@ func (h *PreferencesHandler) UpdatePreferences(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid request"})
 	}
 
-	var prefs models.UserPreferences
-	result := database.DB.Where("user_id = ?", userID).First(&prefs)
+	prefs, err := h.prefsRepo.GetOrCreate(userID)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Failed to get preferences"})
+	}
 
-	if result.Error != nil {
-		prefs = models.UserPreferences{
-			UserID:         userID,
-			ReceiptModel:   req.ReceiptModel,
-			AssistantModel: req.AssistantModel,
-		}
-		if err := database.DB.Create(&prefs).Error; err != nil {
-			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Failed to create preferences"})
-		}
-	} else {
-		if req.ReceiptModel != "" {
-			prefs.ReceiptModel = req.ReceiptModel
-		}
-		if req.AssistantModel != "" {
-			prefs.AssistantModel = req.AssistantModel
-		}
-		if err := database.DB.Save(&prefs).Error; err != nil {
-			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Failed to update preferences"})
-		}
+	if req.ReceiptModel != "" {
+		prefs.ReceiptModel = req.ReceiptModel
+	}
+	if req.AssistantModel != "" {
+		prefs.AssistantModel = req.AssistantModel
+	}
+
+	if err := h.prefsRepo.Update(prefs); err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Failed to update preferences"})
 	}
 
 	return c.JSON(http.StatusOK, prefs)

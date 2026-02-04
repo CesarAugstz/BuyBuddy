@@ -2,12 +2,13 @@ package handlers
 
 import (
 	"buybuddy-api/config"
-	"buybuddy-api/database"
 	"buybuddy-api/models"
 	"buybuddy-api/repository"
 	"buybuddy-api/utils"
 	"fmt"
+	"log"
 	"net/http"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
@@ -16,17 +17,35 @@ import (
 type AssistantHandler struct {
 	cfg          *config.Config
 	receiptRepo  *repository.ReceiptRepository
-	categoryRepo *repository.CategoryRepository
 	chatRepo     *repository.ChatRepository
+	prefsRepo    *repository.PreferencesRepository
+	categoryRepo *repository.CategoryRepository
 }
 
-func NewAssistantHandler(cfg *config.Config, receiptRepo *repository.ReceiptRepository, categoryRepo *repository.CategoryRepository, chatRepo *repository.ChatRepository) *AssistantHandler {
+func NewAssistantHandler(cfg *config.Config, receiptRepo *repository.ReceiptRepository, chatRepo *repository.ChatRepository, prefsRepo *repository.PreferencesRepository, categoryRepo *repository.CategoryRepository) *AssistantHandler {
 	return &AssistantHandler{
 		cfg:          cfg,
 		receiptRepo:  receiptRepo,
-		categoryRepo: categoryRepo,
 		chatRepo:     chatRepo,
+		prefsRepo:    prefsRepo,
+		categoryRepo: categoryRepo,
 	}
+}
+
+func (h *AssistantHandler) getFirstReceiptDate(userID string) *time.Time {
+	cache := utils.GetFirstReceiptCache()
+	if date, ok := cache.Get(userID); ok {
+		return date
+	}
+
+	date, err := h.receiptRepo.GetFirstReceiptDate(userID)
+	if err != nil {
+		fmt.Println("Failed to get first receipt date:", err)
+		return nil
+	}
+
+	cache.Set(userID, date)
+	return date
 }
 
 func (h *AssistantHandler) AskQuestion(c echo.Context) error {
@@ -51,25 +70,60 @@ func (h *AssistantHandler) AskQuestion(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to fetch conversation history")
 	}
 
-	receipts, err := h.receiptRepo.GetByUserID(userID)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to fetch receipts")
-	}
-
-	var prefs models.UserPreferences
-	database.DB.Where("user_id = ?", userID).First(&prefs)
+	prefs, _ := h.prefsRepo.GetOrCreate(userID)
 	assistantModel := prefs.AssistantModel
 	if assistantModel == "" {
 		assistantModel = "gemini-2.5-flash-lite"
 	}
 
-	answer, err := utils.AskShoppingAssistant(c.Request().Context(), req.Question, receipts, conversationHistory, h.cfg.GeminiAPIKey, assistantModel)
+	firstReceiptDate := h.getFirstReceiptDate(userID)
+
+	categories, _ := h.categoryRepo.GetAll()
+
+	intent, err := utils.DetectIntentAndGenerateQuery(c.Request().Context(), req.Question, conversationHistory, firstReceiptDate, categories, h.cfg.GeminiAPIKey)
 	if err != nil {
-		fmt.Println("Assistant error:", err)
+		fmt.Println("Intent detection error:", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, map[string]string{
-			"message": "Failed to get answer from assistant",
+			"message": "Failed to process question",
 			"error":   err.Error(),
 		})
+	}
+
+	var answer string
+
+	if intent.Type == "direct" {
+		answer = intent.Answer
+	} else {
+		var specificResults, generalResults []models.Receipt
+
+		log.Printf("Specific query filters: %+v", intent.Specific)
+		log.Printf("General query filters: %+v", intent.General)
+
+		if intent.Specific != nil {
+			specificResults, err = h.receiptRepo.QueryWithFilters(userID, intent.Specific, 30)
+			if err != nil {
+				fmt.Println("Specific query error:", err)
+			}
+		}
+
+		if intent.General != nil {
+			generalResults, err = h.receiptRepo.QueryWithFilters(userID, intent.General, 30)
+			if err != nil {
+				fmt.Println("General query error:", err)
+			}
+		}
+
+		mergedResults := utils.MergeResults(specificResults, generalResults)
+		compactReceipts := utils.FormatReceiptsCompact(mergedResults, intent.Specific)
+
+		answer, err = utils.GenerateAnswer(c.Request().Context(), req.Question, compactReceipts, conversationHistory, h.cfg.GeminiAPIKey, assistantModel)
+		if err != nil {
+			fmt.Println("Answer generation error:", err)
+			return echo.NewHTTPError(http.StatusInternalServerError, map[string]string{
+				"message": "Failed to get answer from assistant",
+				"error":   err.Error(),
+			})
+		}
 	}
 
 	userMessage := &models.ChatMessage{
@@ -91,6 +145,8 @@ func (h *AssistantHandler) AskQuestion(c echo.Context) error {
 	if err := h.chatRepo.CreateMessage(assistantMessage); err != nil {
 		fmt.Println("Failed to save assistant message:", err)
 	}
+
+	log.Printf("User %s asked: %s | Assistant answered: %s", userID, req.Question, answer)
 
 	return c.JSON(http.StatusOK, models.AssistantResponse{
 		Answer:         answer,

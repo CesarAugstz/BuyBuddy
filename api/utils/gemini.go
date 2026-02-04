@@ -112,8 +112,6 @@ CRITICAL: If you cannot extract the required fields (rawName, nameOptions and to
   "error": "Could not extract required item information (name and price) from the receipt"
 }`, itemMappingsText, categoriesText)
 
-	fmt.Println("Prompt: %s", prompt)
-
 	resp, err := client.Models.GenerateContent(ctx, modelName, []*genai.Content{
 		{
 			Role: "user",

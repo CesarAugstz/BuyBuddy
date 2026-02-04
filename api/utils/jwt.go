@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"buybuddy-api/repository"
 	"errors"
 	"time"
 
@@ -18,7 +19,7 @@ func GenerateJWT(userID, email, secret string) (string, error) {
 		UserID: userID,
 		Email:  email,
 		RegisteredClaims: jwt.RegisteredClaims{
-			ExpiresAt: jwt.NewNumericDate(time.Now().Add(24 * 7 * time.Hour)),
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(repository.SessionDuration)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
 			NotBefore: jwt.NewNumericDate(time.Now()),
 		},

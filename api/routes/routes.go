@@ -15,11 +15,12 @@ func Setup(e *echo.Echo, cfg *config.Config, db *gorm.DB) {
 	receiptRepo := repository.NewReceiptRepository(db)
 	categoryRepo := repository.NewCategoryRepository(db)
 	chatRepo := repository.NewChatRepository(db)
+	prefsRepo := repository.NewPreferencesRepository(db)
 
 	authHandler := handlers.NewAuthHandler(cfg, userRepo)
 	receiptHandler := handlers.NewReceiptHandler(cfg, receiptRepo, categoryRepo)
-	assistantHandler := handlers.NewAssistantHandler(cfg, receiptRepo, categoryRepo, chatRepo)
-	preferencesHandler := handlers.NewPreferencesHandler()
+	assistantHandler := handlers.NewAssistantHandler(cfg, receiptRepo, chatRepo, prefsRepo, categoryRepo)
+	preferencesHandler := handlers.NewPreferencesHandler(prefsRepo)
 
 	e.GET("/health", handlers.Health)
 

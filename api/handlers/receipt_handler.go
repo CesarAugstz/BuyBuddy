@@ -214,6 +214,8 @@ func (h *ReceiptHandler) SaveReceipt(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to save receipt")
 	}
 
+	utils.GetFirstReceiptCache().Invalidate(userID)
+
 	return c.JSON(http.StatusCreated, receipt)
 }
 
@@ -247,6 +249,8 @@ func (h *ReceiptHandler) DeleteReceipt(c echo.Context) error {
 	if err := h.receiptRepo.Delete(receiptID, userID); err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to delete receipt")
 	}
+
+	utils.GetFirstReceiptCache().Invalidate(userID)
 
 	return c.JSON(http.StatusOK, map[string]string{"message": "receipt deleted"})
 }
