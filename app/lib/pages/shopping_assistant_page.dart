@@ -270,15 +270,23 @@ class _ShoppingAssistantPageState extends State<ShoppingAssistantPage> {
                     borderRadius: BorderRadius.circular(20),
                   ),
                   child: message.isUser
-                      ? Text(
-                          message.text,
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 15,
+                      ? Theme(
+                          data: Theme.of(context).copyWith(
+                            textSelectionTheme: TextSelectionThemeData(
+                              selectionColor: Colors.white.withOpacity(0.4),
+                            ),
+                          ),
+                          child: SelectableText(
+                            message.text,
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 15,
+                            ),
                           ),
                         )
                       : MarkdownBody(
                           data: message.text,
+                          selectable: true,
                           styleSheet: MarkdownStyleSheet(
                             p: TextStyle(
                               color: message.isError ? Colors.red.shade900 : AppTheme.nearBlack,

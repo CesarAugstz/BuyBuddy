@@ -368,6 +368,8 @@ IMPORTANT GUIDELINES:
 - Include store name and date when discussing purchases
 - If no relevant data found, tell the user you don't have that information
 - Use conversation context for references like "that product" or "the last one"
+- When counting "how many times" user bought something, count RECEIPTS (separate purchases/dates), not line items
+- Each receipt ID represents one purchase occasion, even if the same product appears multiple times in one receipt
 
 WHEN PROVIDING PRODUCT HISTORY:
 - Product name and brand (if available)
