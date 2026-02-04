@@ -6,6 +6,7 @@ import 'package:http/http.dart' as http;
 import 'dart:async';
 import 'dart:convert';
 import '../config/api_config.dart';
+import 'cache_service.dart';
 
 class UserData {
   final String email;
@@ -195,6 +196,7 @@ class AuthService {
       }
     }
 
+    await CacheService().clearAllCache();
     await _googleSignIn.signOut();
     await _clearUserSession();
     _currentUser = null;

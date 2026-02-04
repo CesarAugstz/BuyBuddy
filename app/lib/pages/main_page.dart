@@ -4,6 +4,7 @@ import '../providers/auth_provider.dart';
 import '../config/theme.dart';
 import 'receipts_page.dart';
 import 'shopping_assistant_page.dart';
+import 'shopping_lists_page.dart';
 import 'model_settings_page.dart';
 
 class MainPage extends ConsumerWidget {
@@ -83,6 +84,17 @@ class MainPage extends ConsumerWidget {
               },
             ),
             ListTile(
+              leading: Icon(Icons.shopping_cart_outlined, color: AppTheme.darkGray),
+              title: Text('Shopping Lists'),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (context) => const ShoppingListsPage()),
+                );
+              },
+            ),
+            ListTile(
               leading: Icon(Icons.chat_bubble_outline, color: AppTheme.darkGray),
               title: Text('Shopping Assistant'),
               onTap: () {
@@ -131,8 +143,10 @@ class MainPage extends ConsumerWidget {
               ),
             ),
             SizedBox(height: 40),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
+            Wrap(
+              spacing: 16,
+              runSpacing: 16,
+              alignment: WrapAlignment.center,
               children: [
                 ElevatedButton.icon(
                   onPressed: () {
@@ -149,7 +163,21 @@ class MainPage extends ConsumerWidget {
                     padding: EdgeInsets.symmetric(horizontal: 24, vertical: 16),
                   ),
                 ),
-                SizedBox(width: 16),
+                ElevatedButton.icon(
+                  onPressed: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => const ShoppingListsPage(),
+                      ),
+                    );
+                  },
+                  icon: Icon(Icons.shopping_cart_outlined),
+                  label: Text('Lists'),
+                  style: ElevatedButton.styleFrom(
+                    padding: EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+                  ),
+                ),
                 ElevatedButton.icon(
                   onPressed: () {
                     Navigator.push(
