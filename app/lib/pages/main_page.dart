@@ -1,18 +1,17 @@
 import 'package:flutter/material.dart';
-import '../services/auth_service.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../providers/auth_provider.dart';
 import '../config/theme.dart';
 import 'receipts_page.dart';
 import 'shopping_assistant_page.dart';
 import 'model_settings_page.dart';
 
-class MainPage extends StatelessWidget {
-  final AuthService _authService = AuthService();
-
-  MainPage({super.key});
+class MainPage extends ConsumerWidget {
+  const MainPage({super.key});
 
   @override
-  Widget build(BuildContext context) {
-    final user = _authService.currentUser;
+  Widget build(BuildContext context, WidgetRef ref) {
+    final user = ref.watch(currentUserProvider);
 
     return Scaffold(
       backgroundColor: Colors.white,
@@ -25,7 +24,7 @@ class MainPage extends StatelessWidget {
           IconButton(
             icon: Icon(Icons.logout_outlined),
             onPressed: () async {
-              await _authService.signOut();
+              await ref.read(authServiceProvider).signOut();
             },
           ),
         ],
@@ -110,7 +109,7 @@ class MainPage extends StatelessWidget {
               leading: Icon(Icons.logout_outlined, color: AppTheme.darkGray),
               title: Text('Sign Out'),
               onTap: () async {
-                await _authService.signOut();
+                await ref.read(authServiceProvider).signOut();
                 if (context.mounted) {
                   Navigator.pop(context);
                 }

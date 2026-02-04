@@ -1,91 +1,26 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../config/theme.dart';
-import '../services/shopping_assistant_service.dart';
+import '../providers/chat_provider.dart';
 
-class ShoppingAssistantPage extends StatefulWidget {
+class ShoppingAssistantPage extends ConsumerStatefulWidget {
   const ShoppingAssistantPage({super.key});
 
   @override
-  State<ShoppingAssistantPage> createState() => _ShoppingAssistantPageState();
+  ConsumerState<ShoppingAssistantPage> createState() => _ShoppingAssistantPageState();
 }
 
-class _ShoppingAssistantPageState extends State<ShoppingAssistantPage> {
-  final _assistantService = ShoppingAssistantService();
+class _ShoppingAssistantPageState extends ConsumerState<ShoppingAssistantPage> {
   final _messageController = TextEditingController();
   final _scrollController = ScrollController();
-  final List<ChatMessage> _messages = [];
-  bool _isLoading = false;
-  String? _conversationId;
-
-  @override
-  void initState() {
-    super.initState();
-    _loadLastConversation();
-  }
-
-  Future<void> _loadLastConversation() async {
-    final prefs = await SharedPreferences.getInstance();
-    final lastConversationId = prefs.getString('last_conversation_id');
-
-    if (lastConversationId != null && lastConversationId.isNotEmpty) {
-      setState(() {
-        _conversationId = lastConversationId;
-        _isLoading = true;
-      });
-
-      try {
-        final history = await _assistantService.getConversationHistory(lastConversationId);
-        
-        if (history.isNotEmpty) {
-          setState(() {
-            _messages.clear();
-            for (var message in history) {
-              _messages.add(ChatMessage(
-                text: message['content'] ?? '',
-                isUser: message['role'] == 'user',
-                timestamp: DateTime.parse(message['createdAt'] ?? DateTime.now().toIso8601String()),
-              ));
-            }
-            _isLoading = false;
-          });
-          _scrollToBottom();
-          return;
-        }
-      } catch (e) {
-        print('Error loading conversation: $e');
-      }
-    }
-
-    _addWelcomeMessage();
-    setState(() => _isLoading = false);
-  }
-
-  void _addWelcomeMessage() {
-    _addMessage(
-      'Hello! I can help you find information about your purchases. Try asking me:\n\n• "How much did I pay for milk last time?"\n• "Where did I buy bread?"\n• "Show me all my purchases from Walmart"\n• "What was the price of eggs?"',
-      isUser: false,
-    );
-  }
 
   @override
   void dispose() {
     _messageController.dispose();
     _scrollController.dispose();
     super.dispose();
-  }
-
-  void _addMessage(String text, {required bool isUser}) {
-    setState(() {
-      _messages.add(ChatMessage(
-        text: text,
-        isUser: isUser,
-        timestamp: DateTime.now(),
-      ));
-    });
-    _scrollToBottom();
   }
 
   void _scrollToBottom() {
@@ -104,54 +39,23 @@ class _ShoppingAssistantPageState extends State<ShoppingAssistantPage> {
     final text = _messageController.text.trim();
     if (text.isEmpty) return;
 
-    _addMessage(text, isUser: true);
     _messageController.clear();
-
-    setState(() => _isLoading = true);
-
-    try {
-      final response = await _assistantService.askQuestion(text, conversationId: _conversationId);
-      setState(() {
-        _conversationId = response['conversationId'];
-      });
-      
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString('last_conversation_id', _conversationId ?? '');
-      
-      final answer = response['answer'] ?? 'No response';
-      
-      if (answer.toLowerCase().contains('error') || 
-          answer.toLowerCase().contains('failed') ||
-          answer.toLowerCase().contains('please log in')) {
-        _addErrorMessage(answer, text);
-      } else {
-        _addMessage(answer, isUser: false);
-      }
-    } catch (e) {
-      _addErrorMessage(
-        'Sorry, I encountered an error: ${e.toString()}',
-        text,
-      );
-    } finally {
-      setState(() => _isLoading = false);
-    }
-  }
-
-  void _addErrorMessage(String errorText, String originalQuestion) {
-    setState(() {
-      _messages.add(ChatMessage(
-        text: errorText,
-        isUser: false,
-        timestamp: DateTime.now(),
-        isError: true,
-        originalQuestion: originalQuestion,
-      ));
-    });
+    await ref.read(chatProvider.notifier).sendMessage(text);
     _scrollToBottom();
   }
 
   @override
   Widget build(BuildContext context) {
+    final chatState = ref.watch(chatProvider);
+    final messages = chatState.messages;
+    final isLoading = chatState.isLoading;
+
+    ref.listen(chatProvider, (previous, next) {
+      if (previous?.messages.length != next.messages.length) {
+        _scrollToBottom();
+      }
+    });
+
     return Scaffold(
       backgroundColor: Colors.white,
       appBar: AppBar(
@@ -162,16 +66,7 @@ class _ShoppingAssistantPageState extends State<ShoppingAssistantPage> {
         actions: [
           IconButton(
             icon: const Icon(Icons.delete_outline),
-            onPressed: () {
-              setState(() {
-                _messages.clear();
-                _conversationId = null;
-                _addMessage(
-                  'Hello! I can help you find information about your purchases. Try asking me:\n\n• "How much did I pay for milk last time?"\n• "Where did I buy bread?"\n• "Show me all my purchases from Walmart"\n• "What was the price of eggs?"',
-                  isUser: false,
-                );
-              });
-            },
+            onPressed: () => ref.read(chatProvider.notifier).clearChat(),
             tooltip: 'Clear chat',
           ),
         ],
@@ -182,14 +77,14 @@ class _ShoppingAssistantPageState extends State<ShoppingAssistantPage> {
             child: ListView.builder(
               controller: _scrollController,
               padding: const EdgeInsets.all(16),
-              itemCount: _messages.length,
+              itemCount: messages.length,
               itemBuilder: (context, index) {
-                final message = _messages[index];
+                final message = messages[index];
                 return _buildMessageBubble(message);
               },
             ),
           ),
-          if (_isLoading)
+          if (isLoading)
             Padding(
               padding: const EdgeInsets.all(8.0),
               child: Row(
@@ -223,7 +118,7 @@ class _ShoppingAssistantPageState extends State<ShoppingAssistantPage> {
                 ],
               ),
             ),
-          _buildInputArea(),
+          _buildInputArea(isLoading),
         ],
       ),
     );
@@ -316,13 +211,8 @@ class _ShoppingAssistantPageState extends State<ShoppingAssistantPage> {
                   Padding(
                     padding: const EdgeInsets.only(top: 8),
                     child: TextButton.icon(
-                      onPressed: () async {
-                        setState(() {
-                          _messages.remove(message);
-                          _messageController.text = message.originalQuestion!;
-                        });
-                        await Future.delayed(Duration(milliseconds: 100));
-                        _sendMessage();
+                      onPressed: () {
+                        ref.read(chatProvider.notifier).retryMessage(message);
                       },
                       icon: Icon(Icons.refresh, size: 18),
                       label: Text('Retry'),
@@ -353,7 +243,7 @@ class _ShoppingAssistantPageState extends State<ShoppingAssistantPage> {
     );
   }
 
-  Widget _buildInputArea() {
+  Widget _buildInputArea(bool isLoading) {
     return Container(
       padding: EdgeInsets.only(
         left: 16,
@@ -422,27 +312,11 @@ class _ShoppingAssistantPageState extends State<ShoppingAssistantPage> {
             child: IconButton(
               icon: const Icon(Icons.send),
               color: Colors.white,
-              onPressed: _isLoading ? null : _sendMessage,
+              onPressed: isLoading ? null : _sendMessage,
             ),
           ),
         ],
       ),
     );
   }
-}
-
-class ChatMessage {
-  final String text;
-  final bool isUser;
-  final DateTime timestamp;
-  final bool isError;
-  final String? originalQuestion;
-
-  ChatMessage({
-    required this.text,
-    required this.isUser,
-    required this.timestamp,
-    this.isError = false,
-    this.originalQuestion,
-  });
 }

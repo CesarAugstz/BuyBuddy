@@ -63,9 +63,8 @@ class AuthService {
       _googleSignIn = GoogleSignIn(
         scopes: ['email', 'profile'],
       );
-      debugPrint('AAAoiee: google client id: ${_googleSignIn.clientId}');
     } catch (e) {
-      print('Error initializing GoogleSignIn: $e');
+      debugPrint('Error initializing GoogleSignIn: $e');
     }
     _initAuth();
   }
@@ -85,7 +84,6 @@ class AuthService {
     }
 
     _googleSignIn.onCurrentUserChanged.listen((account) async {
-      print('Google sign-in state changed: ${account?.email}');
       if (account != null) {
         await _handleGoogleSignIn(account);
       }
@@ -104,22 +102,16 @@ class AuthService {
 
       return await _handleGoogleSignIn(account);
     } on PlatformException catch (e) {
-      debugPrint('Error signing in with Google oieee: $e. $e.');
-      debugPrint("oiee Code: ${e.code}");
-      debugPrint("oiee Message: ${e.message}");
-      debugPrint("oiee Details: ${e.details}");
-      debugPrint("oiee Stacktrace: ${e.stacktrace}");
-      debugPrint('oiee Error signing in with Google: $e');
+      debugPrint('Error signing in with Google: ${e.code} - ${e.message}');
       return null;
     } catch (e) {
-      print('Unexpected error signing in with Google: $e');
+      debugPrint('Unexpected error signing in with Google: $e');
       return null;
     }
   }
 
   Future<UserData?> _handleGoogleSignIn(GoogleSignInAccount account) async {
     try {
-      print('Handling Google sign in for account: ${account.email}');
       final googleAuth = await account.authentication;
       final idToken = googleAuth.idToken;
       final accessToken = googleAuth.accessToken;
@@ -138,7 +130,7 @@ class AuthService {
 
       return userData;
     } catch (e) {
-      print('Error handling Google sign in: $e');
+      debugPrint('Error handling Google sign in: $e');
       await _googleSignIn.signOut();
       return null;
     }
@@ -178,12 +170,12 @@ class AuthService {
         return data['token'];
       }
 
-      print('Backend login failed: ${response.statusCode} - ${response.body}');
+      debugPrint('Backend login failed: ${response.statusCode}');
       throw Exception(
         'Backend authentication failed with status: ${response.statusCode}',
       );
     } catch (e) {
-      print('Error sending token to backend: $e');
+      debugPrint('Error sending token to backend: $e');
       rethrow;
     }
   }
@@ -199,7 +191,7 @@ class AuthService {
           },
         );
       } catch (e) {
-        print('Error notifying backend of logout: $e');
+        debugPrint('Error notifying backend of logout: $e');
       }
     }
 

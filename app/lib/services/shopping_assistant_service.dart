@@ -72,8 +72,7 @@ class ShoppingAssistantService {
         return data.map((item) => item as Map<String, dynamic>).toList();
       }
       return [];
-    } catch (e) {
-      print('Error loading conversation history: $e');
+    } catch (_) {
       return [];
     }
   }

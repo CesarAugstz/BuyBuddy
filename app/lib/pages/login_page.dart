@@ -1,14 +1,13 @@
 import 'package:flutter/material.dart';
-import '../services/auth_service.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../providers/auth_provider.dart';
 import '../config/theme.dart';
 
-class LoginPage extends StatelessWidget {
-  final AuthService _authService = AuthService();
-
-  LoginPage({super.key});
+class LoginPage extends ConsumerWidget {
+  const LoginPage({super.key});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     return Scaffold(
       backgroundColor: Colors.white,
       body: Center(
@@ -49,7 +48,7 @@ class LoginPage extends StatelessWidget {
             SizedBox(height: 60),
             ElevatedButton.icon(
               onPressed: () async {
-                final result = await _authService.signInWithGoogle();
+                final result = await ref.read(authServiceProvider).signInWithGoogle();
                 if (result == null) {
                   if (context.mounted) {
                     ScaffoldMessenger.of(context).showSnackBar(

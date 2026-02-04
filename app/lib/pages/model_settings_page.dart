@@ -14,7 +14,6 @@ class _ModelSettingsPageState extends State<ModelSettingsPage> {
   bool _isLoading = true;
   bool _isSaving = false;
   
-  UserPreferences? _currentPrefs;
   AvailableModels? _availableModels;
   
   String? _selectedReceiptModel;
@@ -34,7 +33,6 @@ class _ModelSettingsPageState extends State<ModelSettingsPage> {
       final models = await _prefsService.getAvailableModels();
       
       setState(() {
-        _currentPrefs = prefs;
         _availableModels = models;
         _selectedReceiptModel = prefs.receiptModel;
         _selectedAssistantModel = prefs.assistantModel;

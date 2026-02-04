@@ -1,47 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../config/theme.dart';
-import '../services/receipt_service.dart';
+import '../providers/receipts_provider.dart';
 
-class ReceiptsListPage extends StatefulWidget {
+class ReceiptsListPage extends ConsumerWidget {
   const ReceiptsListPage({super.key});
 
-  @override
-  State<ReceiptsListPage> createState() => _ReceiptsListPageState();
-}
-
-class _ReceiptsListPageState extends State<ReceiptsListPage> {
-  final _receiptService = ReceiptService();
-  List<dynamic>? _receipts;
-  bool _isLoading = true;
-  String? _error;
-
-  @override
-  void initState() {
-    super.initState();
-    _loadReceipts();
-  }
-
-  Future<void> _loadReceipts() async {
-    setState(() {
-      _isLoading = true;
-      _error = null;
-    });
-
-    try {
-      final receipts = await _receiptService.getReceipts();
-      setState(() {
-        _receipts = receipts;
-        _isLoading = false;
-      });
-    } catch (e) {
-      setState(() {
-        _error = e.toString();
-        _isLoading = false;
-      });
-    }
-  }
-
-  Future<void> _deleteReceipt(String receiptId) async {
+  Future<void> _deleteReceipt(BuildContext context, WidgetRef ref, String receiptId) async {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -63,9 +28,8 @@ class _ReceiptsListPageState extends State<ReceiptsListPage> {
 
     if (confirmed == true) {
       try {
-        await _receiptService.deleteReceipt(receiptId);
-        _loadReceipts();
-        if (mounted) {
+        await ref.read(receiptsProvider.notifier).deleteReceipt(receiptId);
+        if (context.mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
               content: Text('Receipt deleted successfully'),
@@ -74,7 +38,7 @@ class _ReceiptsListPageState extends State<ReceiptsListPage> {
           );
         }
       } catch (e) {
-        if (mounted) {
+        if (context.mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text('Failed to delete receipt: $e'),
@@ -87,7 +51,9 @@ class _ReceiptsListPageState extends State<ReceiptsListPage> {
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final receiptsAsync = ref.watch(receiptsProvider);
+
     return Scaffold(
       backgroundColor: Colors.white,
       appBar: AppBar(
@@ -98,62 +64,60 @@ class _ReceiptsListPageState extends State<ReceiptsListPage> {
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh),
-            onPressed: _loadReceipts,
+            onPressed: () => ref.read(receiptsProvider.notifier).refresh(),
           ),
         ],
       ),
-      body: _buildBody(),
+      body: receiptsAsync.when(
+        data: (receipts) => _buildReceiptsList(context, ref, receipts),
+        loading: () => const Center(child: CircularProgressIndicator()),
+        error: (error, stack) => _buildError(context, ref, error.toString()),
+      ),
     );
   }
 
-  Widget _buildBody() {
-    if (_isLoading) {
-      return const Center(
-        child: CircularProgressIndicator(),
-      );
-    }
-
-    if (_error != null) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              Icons.error_outline,
-              size: 64,
-              color: Colors.red.shade300,
+  Widget _buildError(BuildContext context, WidgetRef ref, String error) {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(
+            Icons.error_outline,
+            size: 64,
+            color: Colors.red.shade300,
+          ),
+          const SizedBox(height: 16),
+          Text(
+            'Error loading receipts',
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.w600,
+              color: AppTheme.nearBlack,
             ),
-            const SizedBox(height: 16),
-            Text(
-              'Error loading receipts',
+          ),
+          const SizedBox(height: 8),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 32),
+            child: Text(
+              error,
+              textAlign: TextAlign.center,
               style: TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.w600,
-                color: AppTheme.nearBlack,
+                color: AppTheme.darkGray,
               ),
             ),
-            const SizedBox(height: 8),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 32),
-              child: Text(
-                _error!,
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  color: AppTheme.darkGray,
-                ),
-              ),
-            ),
-            const SizedBox(height: 24),
-            ElevatedButton(
-              onPressed: _loadReceipts,
-              child: const Text('Retry'),
-            ),
-          ],
-        ),
-      );
-    }
+          ),
+          const SizedBox(height: 24),
+          ElevatedButton(
+            onPressed: () => ref.read(receiptsProvider.notifier).refresh(),
+            child: const Text('Retry'),
+          ),
+        ],
+      ),
+    );
+  }
 
-    if (_receipts == null || _receipts!.isEmpty) {
+  Widget _buildReceiptsList(BuildContext context, WidgetRef ref, List<dynamic> receipts) {
+    if (receipts.isEmpty) {
       return Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -185,19 +149,19 @@ class _ReceiptsListPageState extends State<ReceiptsListPage> {
     }
 
     return RefreshIndicator(
-      onRefresh: _loadReceipts,
+      onRefresh: () => ref.read(receiptsProvider.notifier).refresh(),
       child: ListView.builder(
         padding: const EdgeInsets.all(16),
-        itemCount: _receipts!.length,
+        itemCount: receipts.length,
         itemBuilder: (context, index) {
-          final receipt = _receipts![index];
-          return _buildReceiptCard(receipt);
+          final receipt = receipts[index] as Map<String, dynamic>;
+          return _buildReceiptCard(context, ref, receipt);
         },
       ),
     );
   }
 
-  Widget _buildReceiptCard(Map<String, dynamic> receipt) {
+  Widget _buildReceiptCard(BuildContext context, WidgetRef ref, Map<String, dynamic> receipt) {
     final company = receipt['company'] ?? 'Unknown';
     final total = receipt['total'] ?? 0.0;
     final createdAt = receipt['createdAt'] ?? '';
@@ -212,7 +176,7 @@ class _ReceiptsListPageState extends State<ReceiptsListPage> {
       child: InkWell(
         borderRadius: BorderRadius.circular(12),
         onTap: () {
-          _showReceiptDetails(receipt);
+          _showReceiptDetails(context, receipt);
         },
         child: Padding(
           padding: const EdgeInsets.all(16),
@@ -275,7 +239,7 @@ class _ReceiptsListPageState extends State<ReceiptsListPage> {
                 mainAxisAlignment: MainAxisAlignment.end,
                 children: [
                   TextButton.icon(
-                    onPressed: () => _deleteReceipt(receipt['id']),
+                    onPressed: () => _deleteReceipt(context, ref, receipt['id']),
                     icon: const Icon(Icons.delete_outline, size: 18),
                     label: const Text('Delete'),
                     style: TextButton.styleFrom(
@@ -291,7 +255,7 @@ class _ReceiptsListPageState extends State<ReceiptsListPage> {
     );
   }
 
-  void _showReceiptDetails(Map<String, dynamic> receipt) {
+  void _showReceiptDetails(BuildContext context, Map<String, dynamic> receipt) {
     final items = receipt['items'] as List<dynamic>? ?? [];
     
     showModalBottomSheet(

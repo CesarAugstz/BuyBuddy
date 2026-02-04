@@ -62,8 +62,7 @@ class ReceiptService {
         );
       }
       return true;
-    } catch (e) {
-      print('Error saving receipt: $e');
+    } catch (_) {
       rethrow;
     }
   }
@@ -87,8 +86,7 @@ class ReceiptService {
       } else {
         throw Exception('Failed to load receipts: ${response.statusCode}');
       }
-    } catch (e) {
-      print('Error loading receipts: $e');
+    } catch (_) {
       rethrow;
     }
   }
@@ -111,8 +109,7 @@ class ReceiptService {
       } else {
         throw Exception('Failed to delete receipt: ${response.statusCode}');
       }
-    } catch (e) {
-      print('Error deleting receipt: $e');
+    } catch (_) {
       rethrow;
     }
   }
