@@ -149,13 +149,20 @@ class ReceiptsListPage extends ConsumerWidget {
       );
     }
 
+    final sortedReceipts = List<dynamic>.from(receipts)
+      ..sort((a, b) {
+        final aDate = _receiptDate(a as Map<String, dynamic>);
+        final bDate = _receiptDate(b as Map<String, dynamic>);
+        return bDate.compareTo(aDate);
+      });
+
     return RefreshIndicator(
       onRefresh: () => ref.read(receiptsProvider.notifier).refresh(),
       child: ListView.builder(
         padding: const EdgeInsets.all(16),
-        itemCount: receipts.length,
+        itemCount: sortedReceipts.length,
         itemBuilder: (context, index) {
-          final receipt = receipts[index] as Map<String, dynamic>;
+          final receipt = sortedReceipts[index] as Map<String, dynamic>;
           return _buildReceiptCard(context, ref, receipt);
         },
       ),
@@ -440,17 +447,23 @@ class ReceiptsListPage extends ConsumerWidget {
   }
 
   String _formatReceiptDate(Map<String, dynamic> receipt) {
-    final dateStr = receipt['date'] ?? receipt['createdAt'];
-    if (dateStr == null || dateStr is! String || dateStr.isEmpty) {
+    final date = _receiptDate(receipt);
+    if (date.millisecondsSinceEpoch == 0) {
       return 'Unknown date';
     }
 
-    try {
-      final date = DateTime.parse(dateStr);
-      if (date.year <= 1) return 'Unknown date';
-      return DateFormat('dd/MM/yyyy HH:mm').format(date);
-    } on FormatException {
-      return 'Unknown date';
+    return DateFormat('dd/MM/yyyy HH:mm').format(date);
+  }
+
+  DateTime _receiptDate(Map<String, dynamic> receipt) {
+    for (final value in [receipt['date'], receipt['createdAt']]) {
+      if (value is String && value.isNotEmpty) {
+        final date = DateTime.tryParse(value);
+        if (date != null && date.year > 1) {
+          return date;
+        }
+      }
     }
+    return DateTime.fromMillisecondsSinceEpoch(0);
   }
 }

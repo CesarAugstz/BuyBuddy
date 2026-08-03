@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"math"
+	"sort"
 	"strings"
 	"time"
 
@@ -28,7 +30,7 @@ RECEIPT_ITEMS table (each receipt has multiple items):
 - brand: product brand (may be empty)
 - quantity: amount purchased
 - unit: unit of measurement (un, kg, L, etc.)
-- unit_price: price per unit
+- unit_price: average net amount actually paid per unit after discounts
 - total_price: total price for this item
 - category: product category name
 - subcategory: product subcategory name
@@ -116,7 +118,9 @@ OPTION B - Query needed (for questions about purchases, prices, products, spendi
 {
   "type": "query",
   "specific": {
-    "productName": ["exact product name or 1-2 close variations"],
+    "productName": ["the requested product concept and only true equivalent names"],
+    "productScope": "specific" | "generic",
+    "productConcept": "canonical product the user is asking about",
     "company": ["store name if mentioned"],
     "brand": ["brand if mentioned"],
     "category": ["category if relevant"],
@@ -130,7 +134,9 @@ OPTION B - Query needed (for questions about purchases, prices, products, spendi
     "returnFullReceipt": false (set to true ONLY if user needs to see ALL items from matching receipts, not just the queried products)
   },
   "general": {
-    "productName": ["broader variations, synonyms, related terms - 3-5 options"],
+    "productName": ["spelling variants and strict synonyms of the SAME product only"],
+    "productScope": "same value as specific",
+    "productConcept": "same value as specific",
     "company": ["if mentioned, keep same"],
     "brand": ["if mentioned, keep same or add variations"],
     "category": ["broader category if relevant"],
@@ -147,6 +153,10 @@ OPTION B - Query needed (for questions about purchases, prices, products, spendi
 IMPORTANT NOTES:
 - When searching for multiple specific product names (e.g., "patinho bovino", "leite"), the category filter will be ignored automatically since products span multiple categories
 - Use returnFullReceipt: true only when user asks something like "what else did I buy with X" or "show me the full receipt"
+- First identify the product concept the user actually means. Never add merely related, complementary, substitute, or same-category products
+- productScope is "specific" when the user names a brand, exact variant, package, or precise product; it is "generic" for broad concepts such as "cerveja", "chocolate", "leite", or "carne"
+- For generic product questions, productName should contain the generic concept and strict linguistic equivalents only. Results will be grouped into distinct products/brands later
+- Examples: "Eisenbahn" must not include Spaten; "Coca-Cola" must not include other refrigerantes; "cerveja" may include beer brands but not wine, soda, or snacks
 
 LIMIT AND ORDER EXAMPLES:
 - "last purchase" → limit: 1, orderBy: "date_desc"
@@ -158,7 +168,7 @@ LIMIT AND ORDER EXAMPLES:
 - Price comparison questions → limit: 5-10 (need multiple purchases to compare)
 
 For the general query, make it less restrictive than specific:
-- Add more product name variations and synonyms
+- Add only spelling variations and strict synonyms of the same product concept
 - Widen or remove date constraints
 - Remove price constraints
 - Keep only essential filters
@@ -246,7 +256,7 @@ func FormatReceiptsCompact(receipts []models.Receipt, filter *models.AssistantQu
 		"bc":  "barcode",
 	}
 
-	shouldFilterItems := filter != nil && !filter.ReturnFullReceipt && len(filter.ProductName) > 0
+	shouldFilterItems := filter != nil && !filter.ReturnFullReceipt && hasItemFilters(filter)
 
 	compactReceipts := make([]models.CompactReceipt, 0, len(receipts))
 	for _, r := range receipts {
@@ -294,16 +304,177 @@ func FormatReceiptsCompact(receipts []models.Receipt, filter *models.AssistantQu
 	}
 
 	return &models.CompactReceiptResponse{
-		Legend:   legend,
-		Receipts: compactReceipts,
+		Legend:        legend,
+		ProductScope:  productScope(filter),
+		ProductGroups: buildCompactProductGroups(receipts, filter),
+		Receipts:      compactReceipts,
 	}
 }
 
+type productGroupAccumulator struct {
+	group      models.CompactProductGroup
+	totalPaid  float64
+	variants   map[string]struct{}
+	receiptIDs map[string]struct{}
+	latestTime time.Time
+}
+
+func buildCompactProductGroups(receipts []models.Receipt, filter *models.AssistantQueryFilter) []models.CompactProductGroup {
+	if productScope(filter) != "generic" {
+		return nil
+	}
+
+	groups := make(map[string]*productGroupAccumulator)
+	for _, receipt := range receipts {
+		for _, item := range receipt.Items {
+			if !itemMatchesFilter(item, filter) {
+				continue
+			}
+
+			name := strings.TrimSpace(item.Name)
+			if name == "" {
+				name = strings.TrimSpace(item.RawName)
+			}
+			brand := strings.TrimSpace(item.Brand)
+			unit := strings.TrimSpace(item.Unit)
+			key := normalizeProductText(name) + "\x00" +
+				normalizeProductText(brand) + "\x00" +
+				normalizeProductText(unit)
+
+			accumulator, found := groups[key]
+			if !found {
+				accumulator = &productGroupAccumulator{
+					group: models.CompactProductGroup{
+						Name:             name,
+						Brand:            brand,
+						Unit:             unit,
+						MinimumUnitPrice: item.UnitPrice,
+						MaximumUnitPrice: item.UnitPrice,
+					},
+					variants:   make(map[string]struct{}),
+					receiptIDs: make(map[string]struct{}),
+				}
+				if item.Category != nil {
+					accumulator.group.Category = strings.TrimSpace(item.Category.Name)
+				}
+				if item.Subcategory != nil {
+					accumulator.group.Subcategory = strings.TrimSpace(item.Subcategory.Name)
+				}
+				groups[key] = accumulator
+			}
+
+			accumulator.group.TotalQuantity += item.Quantity
+			accumulator.totalPaid += item.TotalPrice
+			accumulator.group.MinimumUnitPrice = math.Min(accumulator.group.MinimumUnitPrice, item.UnitPrice)
+			accumulator.group.MaximumUnitPrice = math.Max(accumulator.group.MaximumUnitPrice, item.UnitPrice)
+			accumulator.receiptIDs[receipt.ID] = struct{}{}
+
+			if rawName := strings.TrimSpace(item.RawName); rawName != "" && !strings.EqualFold(rawName, name) {
+				accumulator.variants[rawName] = struct{}{}
+			}
+
+			if receipt.Date != nil && (accumulator.latestTime.IsZero() || receipt.Date.After(accumulator.latestTime)) {
+				accumulator.latestTime = *receipt.Date
+				accumulator.group.LatestDate = receipt.Date.Format("2006-01-02")
+				accumulator.group.LatestUnitPrice = item.UnitPrice
+			}
+		}
+	}
+
+	result := make([]models.CompactProductGroup, 0, len(groups))
+	for _, accumulator := range groups {
+		accumulator.group.PurchaseCount = len(accumulator.receiptIDs)
+		if accumulator.group.TotalQuantity > 0 {
+			accumulator.group.AverageUnitPrice = accumulator.totalPaid / accumulator.group.TotalQuantity
+		}
+		for variant := range accumulator.variants {
+			accumulator.group.Variants = append(accumulator.group.Variants, variant)
+		}
+		sort.Strings(accumulator.group.Variants)
+		result = append(result, accumulator.group)
+	}
+
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].PurchaseCount != result[j].PurchaseCount {
+			return result[i].PurchaseCount > result[j].PurchaseCount
+		}
+		return result[i].LatestDate > result[j].LatestDate
+	})
+
+	return result
+}
+
+func productScope(filter *models.AssistantQueryFilter) string {
+	if filter == nil {
+		return ""
+	}
+	return filter.ProductScope
+}
+
+func normalizeProductText(value string) string {
+	return strings.ToLower(strings.Join(strings.Fields(value), " "))
+}
+
 func itemMatchesFilter(item models.ReceiptItem, filter *models.AssistantQueryFilter) bool {
-	for _, name := range filter.ProductName {
-		nameLower := strings.ToLower(name)
-		if strings.Contains(strings.ToLower(item.Name), nameLower) ||
-			strings.Contains(strings.ToLower(item.RawName), nameLower) {
+	if filter == nil {
+		return true
+	}
+
+	if len(filter.ProductName) > 0 {
+		matchesName := false
+		for _, name := range filter.ProductName {
+			nameLower := normalizeProductText(name)
+			if nameLower == "" {
+				continue
+			}
+			if strings.Contains(normalizeProductText(item.Name), nameLower) ||
+				strings.Contains(normalizeProductText(item.RawName), nameLower) {
+				matchesName = true
+				break
+			}
+		}
+		if !matchesName {
+			return false
+		}
+	}
+
+	if len(filter.Brand) > 0 && !matchesAnyText(item.Brand, filter.Brand) {
+		return false
+	}
+
+	if len(filter.ProductName) <= 1 {
+		category := ""
+		if item.Category != nil {
+			category = item.Category.Name
+		}
+		if len(filter.Category) > 0 && !matchesAnyText(category, filter.Category) {
+			return false
+		}
+
+		subcategory := ""
+		if item.Subcategory != nil {
+			subcategory = item.Subcategory.Name
+		}
+		if len(filter.Subcategory) > 0 && !matchesAnyText(subcategory, filter.Subcategory) {
+			return false
+		}
+	}
+
+	return hasItemFilters(filter)
+}
+
+func hasItemFilters(filter *models.AssistantQueryFilter) bool {
+	return len(filter.ProductName) > 0 ||
+		len(filter.Brand) > 0 ||
+		len(filter.Category) > 0 ||
+		len(filter.Subcategory) > 0
+}
+
+func matchesAnyText(value string, candidates []string) bool {
+	value = normalizeProductText(value)
+	for _, candidate := range candidates {
+		candidate = normalizeProductText(candidate)
+		if candidate != "" && strings.Contains(value, candidate) {
 			return true
 		}
 	}
@@ -370,6 +541,8 @@ IMPORTANT GUIDELINES:
 - Use conversation context for references like "that product" or "the last one"
 - When counting "how many times" user bought something, count RECEIPTS (separate purchases/dates), not line items
 - Each receipt ID represents one purchase occasion, even if the same product appears multiple times in one receipt
+- Never mention products that are only related, complementary, substitutable, or in the same category unless they appear in the supplied matching data
+- Treat productGroups as the authoritative summary when productScope is "generic"
 
 WHEN PROVIDING PRODUCT HISTORY:
 - Product name and brand (if available)
@@ -380,6 +553,9 @@ WHEN PROVIDING PRODUCT HISTORY:
 - Use markdown formatting (bold, lists)
 - Show price comparisons for repeat purchases
 - Highlight most recent purchase
+- For productScope "specific", answer only about the requested exact product/brand/variant
+- For productScope "generic", organize the answer by productGroups. Use one section or bullet per distinct product/brand, with purchase count, total quantity, average paid unit price, price range, and latest price
+- If a generic group has variants, show them as supporting descriptions rather than mixing them into other groups
 
 Respond in the same language as the user's question. Be concise but informative.`, string(receiptsJSON), conversationContext, question)
 

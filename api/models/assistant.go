@@ -13,6 +13,8 @@ type AssistantQueryFilter struct {
 	Limit             *int     `json:"limit,omitempty"`
 	OrderBy           string   `json:"orderBy,omitempty"`
 	ReturnFullReceipt bool     `json:"returnFullReceipt,omitempty"`
+	ProductScope      string   `json:"productScope,omitempty"`
+	ProductConcept    string   `json:"productConcept,omitempty"`
 }
 
 type AssistantIntentResponse struct {
@@ -43,7 +45,25 @@ type CompactReceipt struct {
 	Items   []CompactReceiptItem `json:"items,omitempty"`
 }
 
+type CompactProductGroup struct {
+	Name             string   `json:"name"`
+	Brand            string   `json:"brand,omitempty"`
+	Unit             string   `json:"unit,omitempty"`
+	Variants         []string `json:"variants,omitempty"`
+	Category         string   `json:"category,omitempty"`
+	Subcategory      string   `json:"subcategory,omitempty"`
+	PurchaseCount    int      `json:"purchaseCount"`
+	TotalQuantity    float64  `json:"totalQuantity"`
+	AverageUnitPrice float64  `json:"averageUnitPrice"`
+	MinimumUnitPrice float64  `json:"minimumUnitPrice"`
+	MaximumUnitPrice float64  `json:"maximumUnitPrice"`
+	LatestUnitPrice  float64  `json:"latestUnitPrice"`
+	LatestDate       string   `json:"latestDate,omitempty"`
+}
+
 type CompactReceiptResponse struct {
-	Legend   map[string]string `json:"_legend"`
-	Receipts []CompactReceipt  `json:"receipts"`
+	Legend        map[string]string     `json:"_legend"`
+	ProductScope  string                `json:"productScope,omitempty"`
+	ProductGroups []CompactProductGroup `json:"productGroups,omitempty"`
+	Receipts      []CompactReceipt      `json:"receipts"`
 }

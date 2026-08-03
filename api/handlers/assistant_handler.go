@@ -94,27 +94,29 @@ func (h *AssistantHandler) AskQuestion(c echo.Context) error {
 	if intent.Type == "direct" {
 		answer = intent.Answer
 	} else {
-		var specificResults, generalResults []models.Receipt
+		var results []models.Receipt
+		effectiveFilter := intent.Specific
 
 		log.Printf("Specific query filters: %+v", intent.Specific)
 		log.Printf("General query filters: %+v", intent.General)
 
 		if intent.Specific != nil {
-			specificResults, err = h.receiptRepo.QueryWithFilters(userID, intent.Specific, 30)
+			results, err = h.receiptRepo.QueryWithFilters(userID, intent.Specific, 30)
 			if err != nil {
 				fmt.Println("Specific query error:", err)
 			}
 		}
 
-		if intent.General != nil {
-			generalResults, err = h.receiptRepo.QueryWithFilters(userID, intent.General, 30)
+		if len(results) == 0 && intent.General != nil {
+			results, err = h.receiptRepo.QueryWithFilters(userID, intent.General, 30)
 			if err != nil {
 				fmt.Println("General query error:", err)
+			} else {
+				effectiveFilter = intent.General
 			}
 		}
 
-		mergedResults := utils.MergeResults(specificResults, generalResults)
-		compactReceipts := utils.FormatReceiptsCompact(mergedResults, intent.Specific)
+		compactReceipts := utils.FormatReceiptsCompact(results, effectiveFilter)
 
 		answer, err = utils.GenerateAnswer(c.Request().Context(), req.Question, compactReceipts, conversationHistory, h.cfg.GeminiAPIKey, assistantModel)
 		if err != nil {
