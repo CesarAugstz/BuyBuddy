@@ -11,19 +11,22 @@ class ShoppingListsNotifier extends AsyncNotifier<List<ShoppingList>> {
 
   @override
   Future<List<ShoppingList>> build() async {
+    print("[ShoppingListsNotifier] build called");
     return _fetchLists();
   }
 
   Future<List<ShoppingList>> _fetchLists({bool forceRefresh = false}) async {
     final cache = ref.read(cacheServiceProvider);
+    print("[ShoppingListsNotifier] _fetchLists called with forceRefresh=$forceRefresh");
 
     if (!forceRefresh) {
       final cached = await cache.get<List<dynamic>>(_cacheKey);
       if (cached != null) {
+        print("[ShoppingListsNotifier] Returning cached shopping lists: $cached");
         return cached.map((e) => ShoppingList.fromJson(e)).toList();
       }
     }
-
+    print("[ShoppingListsNotifier] Fetching shopping lists from service");
     final service = ref.read(shoppingListServiceProvider);
     final lists = await service.getLists();
 
@@ -44,6 +47,7 @@ class ShoppingListsNotifier extends AsyncNotifier<List<ShoppingList>> {
 
   Future<void> invalidateCache() async {
     final cache = ref.read(cacheServiceProvider);
+    print("[ShoppingListsNotifier] Invalidating cache for key $_cacheKey");
     await cache.invalidate(_cacheKey);
   }
 

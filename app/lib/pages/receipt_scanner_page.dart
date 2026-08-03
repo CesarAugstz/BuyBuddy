@@ -1,11 +1,17 @@
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:intl/intl.dart';
 import 'dart:typed_data';
 import '../services/receipt_service.dart';
 import '../config/theme.dart';
 
 class ReceiptScannerPage extends StatefulWidget {
-  const ReceiptScannerPage({super.key});
+  final bool openGalleryOnStart;
+
+  const ReceiptScannerPage({
+    super.key,
+    this.openGalleryOnStart = false,
+  });
 
   @override
   State<ReceiptScannerPage> createState() => _ReceiptScannerPageState();
@@ -22,6 +28,18 @@ class _ReceiptScannerPageState extends State<ReceiptScannerPage> {
   Map<int, bool> _expandedItems = {};
   Map<int, TextEditingController> _customNameControllers = {};
 
+  @override
+  void initState() {
+    super.initState();
+    if (widget.openGalleryOnStart) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          _pickImage(ImageSource.gallery);
+        }
+      });
+    }
+  }
+
   Future<void> _pickImage(ImageSource source) async {
     try {
       final XFile? image = await _imagePicker.pickImage(
@@ -33,6 +51,7 @@ class _ReceiptScannerPageState extends State<ReceiptScannerPage> {
 
       if (image != null) {
         final bytes = await image.readAsBytes();
+        if (!mounted) return;
         setState(() {
           _imageBytes = bytes;
           _extractedData = null;
@@ -41,6 +60,7 @@ class _ReceiptScannerPageState extends State<ReceiptScannerPage> {
         await _processImage();
       }
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         _error = 'Failed to pick image: $e';
       });
@@ -248,9 +268,28 @@ class _ReceiptScannerPageState extends State<ReceiptScannerPage> {
               ),
               const SizedBox(height: 12),
               _buildDataCard(
+                'Date',
+                _formatExtractedDate(_extractedData!['date']),
+              ),
+              const SizedBox(height: 12),
+              _buildDataCard(
                 'Total',
                 'R\$ ${_extractedData!['total'] ?? '0.00'}',
               ),
+              if (_getExtractedAmount('receiptDiscount') > 0) ...[
+                const SizedBox(height: 12),
+                _buildDataCard(
+                  'Receipt Discount',
+                  '- R\$ ${_getExtractedAmount('receiptDiscount').toStringAsFixed(2)}',
+                ),
+              ],
+              if (_getExtractedAmount('additionalCharges') > 0) ...[
+                const SizedBox(height: 12),
+                _buildDataCard(
+                  'Additional Charges',
+                  'R\$ ${_getExtractedAmount('additionalCharges').toStringAsFixed(2)}',
+                ),
+              ],
               if (_extractedData!['accessKey'] != null &&
                   _extractedData!['accessKey'] != '') ...[
                 const SizedBox(height: 12),
@@ -291,6 +330,19 @@ class _ReceiptScannerPageState extends State<ReceiptScannerPage> {
         ),
       ),
     );
+  }
+
+  String _formatExtractedDate(dynamic value) {
+    if (value is! String || value.isEmpty) return 'Not found';
+
+    final date = DateTime.tryParse(value);
+    if (date == null || date.year <= 1) return 'Not found';
+
+    return DateFormat('dd/MM/yyyy HH:mm').format(date);
+  }
+
+  double _getExtractedAmount(String key) {
+    return (_extractedData?[key] as num?)?.toDouble() ?? 0;
   }
 
   Widget _buildDataCard(
@@ -334,12 +386,15 @@ class _ReceiptScannerPageState extends State<ReceiptScannerPage> {
     final nameOptions = item['nameOptions'] as List?;
     final selectedName = item['name'] ?? (nameOptions?.isNotEmpty == true ? nameOptions![0] : 'Unknown item');
     final customName = item['customName'] as String?; // For user-typed custom names
+    final needsReview = item['needsReview'] == true;
+    final warning = item['warning'] as String?;
     
     final brand = item['brand'] as String?;
     final quantity = item['quantity'];
     final unit = item['unit'] as String?;
     final unitPrice = item['unitPrice'];
     final totalPrice = item['totalPrice'];
+    final discount = (item['discount'] as num?)?.toDouble() ?? 0;
     
     final categoryOptions = item['categoryOptions'] as List?;
     final category = item['category'] as String?;
@@ -432,6 +487,19 @@ class _ReceiptScannerPageState extends State<ReceiptScannerPage> {
                                 ),
                               ),
                             ],
+                            if (needsReview) ...[
+                              const SizedBox(height: 6),
+                              Text(
+                                warning?.isNotEmpty == true
+                                    ? 'Review needed: $warning'
+                                    : 'Review needed',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: Colors.orange.shade800,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ],
                           ],
                         ),
                       ),
@@ -462,6 +530,12 @@ class _ReceiptScannerPageState extends State<ReceiptScannerPage> {
                           null,
                           'R\$ ${unitPrice.toStringAsFixed(2)}/$unit',
                           Colors.orange,
+                        ),
+                      if (discount > 0)
+                        _buildInfoChip(
+                          Icons.discount_outlined,
+                          '- R\$ ${discount.toStringAsFixed(2)}',
+                          Colors.green,
                         ),
                       if (selectedCategory != null)
                         _buildInfoChip(Icons.category, selectedCategory, Colors.purple),

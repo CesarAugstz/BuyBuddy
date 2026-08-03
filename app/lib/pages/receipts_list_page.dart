@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:intl/intl.dart';
 import '../config/theme.dart';
 import '../providers/receipts_provider.dart';
 
@@ -164,7 +165,6 @@ class ReceiptsListPage extends ConsumerWidget {
   Widget _buildReceiptCard(BuildContext context, WidgetRef ref, Map<String, dynamic> receipt) {
     final company = receipt['company'] ?? 'Unknown';
     final total = receipt['total'] ?? 0.0;
-    final createdAt = receipt['createdAt'] ?? '';
     final items = receipt['items'] as List<dynamic>? ?? [];
 
     return Card(
@@ -202,7 +202,7 @@ class ReceiptsListPage extends ConsumerWidget {
                         ),
                         const SizedBox(height: 4),
                         Text(
-                          _formatDate(createdAt),
+                          _formatReceiptDate(receipt),
                           style: TextStyle(
                             fontSize: 13,
                             color: AppTheme.darkGray,
@@ -307,12 +307,26 @@ class ReceiptsListPage extends ConsumerWidget {
                 padding: const EdgeInsets.all(16),
                 children: [
                   _buildDetailRow('Total', 'R\$ ${receipt['total']?.toStringAsFixed(2) ?? '0.00'}'),
+                  if (_receiptAmount(receipt, 'receiptDiscount') > 0) ...[
+                    const SizedBox(height: 8),
+                    _buildDetailRow(
+                      'Receipt Discount',
+                      '- R\$ ${_receiptAmount(receipt, 'receiptDiscount').toStringAsFixed(2)}',
+                    ),
+                  ],
+                  if (_receiptAmount(receipt, 'additionalCharges') > 0) ...[
+                    const SizedBox(height: 8),
+                    _buildDetailRow(
+                      'Additional Charges',
+                      'R\$ ${_receiptAmount(receipt, 'additionalCharges').toStringAsFixed(2)}',
+                    ),
+                  ],
                   if (receipt['accessKey'] != null && receipt['accessKey'] != '') ...[
                     const SizedBox(height: 8),
                     _buildDetailRow('Access Key', receipt['accessKey'], monospace: true),
                   ],
                   const SizedBox(height: 8),
-                  _buildDetailRow('Date', _formatDate(receipt['createdAt'] ?? '')),
+                  _buildDetailRow('Date', _formatReceiptDate(receipt)),
                   const SizedBox(height: 24),
                   Text(
                     'Items (${items.length})',
@@ -362,6 +376,10 @@ class ReceiptsListPage extends ConsumerWidget {
         ],
       ),
     );
+  }
+
+  double _receiptAmount(Map<String, dynamic> receipt, String key) {
+    return (receipt[key] as num?)?.toDouble() ?? 0;
   }
 
   Widget _buildItemRow(Map<String, dynamic> item) {
@@ -421,14 +439,18 @@ class ReceiptsListPage extends ConsumerWidget {
     );
   }
 
-  String _formatDate(String dateStr) {
-    if (dateStr.isEmpty) return 'Unknown date';
-    
+  String _formatReceiptDate(Map<String, dynamic> receipt) {
+    final dateStr = receipt['date'] ?? receipt['createdAt'];
+    if (dateStr == null || dateStr is! String || dateStr.isEmpty) {
+      return 'Unknown date';
+    }
+
     try {
       final date = DateTime.parse(dateStr);
-      return '${date.day}/${date.month}/${date.year} ${date.hour}:${date.minute.toString().padLeft(2, '0')}';
-    } catch (e) {
-      return dateStr;
+      if (date.year <= 1) return 'Unknown date';
+      return DateFormat('dd/MM/yyyy HH:mm').format(date);
+    } on FormatException {
+      return 'Unknown date';
     }
   }
 }

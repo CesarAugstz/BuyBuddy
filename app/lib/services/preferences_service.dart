@@ -14,8 +14,8 @@ class UserPreferences {
 
   factory UserPreferences.fromJson(Map<String, dynamic> json) {
     return UserPreferences(
-      receiptModel: json['receipt_model'] ?? 'gemini-2.5-flash',
-      assistantModel: json['assistant_model'] ?? 'gemini-2.5-flash-lite',
+      receiptModel: json['receipt_model'] ?? 'gemini-3.6-flash',
+      assistantModel: json['assistant_model'] ?? 'gemini-3.5-flash-lite',
     );
   }
 
@@ -31,11 +31,13 @@ class GeminiModel {
   final String id;
   final String name;
   final String description;
+  final String pricing;
 
   GeminiModel({
     required this.id,
     required this.name,
     required this.description,
+    required this.pricing,
   });
 
   factory GeminiModel.fromJson(Map<String, dynamic> json) {
@@ -43,6 +45,7 @@ class GeminiModel {
       id: json['id'],
       name: json['name'],
       description: json['description'],
+      pricing: json['pricing'] ?? 'Pricing unavailable',
     );
   }
 }

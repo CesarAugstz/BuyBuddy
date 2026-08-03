@@ -183,7 +183,20 @@ class _ModelSettingsPageState extends State<ModelSettingsPage> {
           groupValue: selectedValue,
           onChanged: onChanged,
           title: Text(model.name),
-          subtitle: Text(model.description),
+          subtitle: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(model.description),
+              const SizedBox(height: 2),
+              Text(
+                model.pricing,
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: Colors.green[700],
+                      fontWeight: FontWeight.w600,
+                    ),
+              ),
+            ],
+          ),
           activeColor: Theme.of(context).primaryColor,
         ),
       );

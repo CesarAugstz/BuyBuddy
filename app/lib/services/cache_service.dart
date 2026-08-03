@@ -38,6 +38,7 @@ class CacheService {
   Future<T?> get<T>(String key, {bool checkDisk = true}) async {
     if (_memoryCache.containsKey(key)) {
       final entry = _memoryCache[key]!;
+      print("memory cache hit for key $key: ${entry.toJson()}");
       if (!entry.isExpired) {
         return entry.data as T;
       }
@@ -47,6 +48,7 @@ class CacheService {
     if (checkDisk) {
       final prefs = await SharedPreferences.getInstance();
       final cached = prefs.getString('$_cachePrefix$key');
+      print("cached for key $_cachePrefix$key: $cached");
       if (cached != null) {
         try {
           final entry = CacheEntry.fromJson(jsonDecode(cached));
@@ -100,16 +102,15 @@ class CacheService {
     }
   }
 
-  void clearMemoryCache() {
-    _memoryCache.clear();
-  }
-
   Future<void> clearAllCache() async {
     _memoryCache.clear();
     final prefs = await SharedPreferences.getInstance();
     final keysToRemove = prefs.getKeys().where((k) => k.startsWith(_cachePrefix)).toList();
+    print("removing keys: $keysToRemove");
     for (final key in keysToRemove) {
       await prefs.remove(key);
     }
+    print("after remove: ");
+    print("keys: ${prefs.getKeys().where((k) => k.startsWith(_cachePrefix)).toList()}");
   }
 }
