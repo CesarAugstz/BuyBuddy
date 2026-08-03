@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 const SessionDuration = 7 * 24 * time.Hour
@@ -70,7 +71,7 @@ func (r *UserRepository) CreateSession(userID, token string) error {
 		ExpiresAt: time.Now().Add(SessionDuration),
 	}
 
-	return r.db.Create(&session).Error
+	return r.db.Clauses(clause.OnConflict{DoNothing: true}).Create(&session).Error
 }
 
 func (r *UserRepository) DeleteSession(token string) error {

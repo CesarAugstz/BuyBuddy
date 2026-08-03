@@ -36,8 +36,8 @@ func (r *PreferencesRepository) GetOrCreate(userID string) (*models.UserPreferen
 	if err == gorm.ErrRecordNotFound {
 		prefs = &models.UserPreferences{
 			UserID:         userID,
-			ReceiptModel:   "gemini-2.5-flash",
-			AssistantModel: "gemini-2.5-flash-lite",
+			ReceiptModel:   models.DefaultReceiptModel,
+			AssistantModel: models.DefaultAssistantModel,
 		}
 		if err := r.Create(prefs); err != nil {
 			return nil, err
@@ -47,5 +47,21 @@ func (r *PreferencesRepository) GetOrCreate(userID string) (*models.UserPreferen
 	if err != nil {
 		return nil, err
 	}
+
+	changed := false
+	if !models.IsSupportedGeminiModel(prefs.ReceiptModel) {
+		prefs.ReceiptModel = models.DefaultReceiptModel
+		changed = true
+	}
+	if !models.IsSupportedGeminiModel(prefs.AssistantModel) {
+		prefs.AssistantModel = models.DefaultAssistantModel
+		changed = true
+	}
+	if changed {
+		if err := r.Update(prefs); err != nil {
+			return nil, err
+		}
+	}
+
 	return prefs, nil
 }

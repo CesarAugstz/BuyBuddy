@@ -7,38 +7,42 @@ import (
 )
 
 type Receipt struct {
-	ID        string         `gorm:"primaryKey;type:uuid;default:gen_random_uuid()" json:"id"`
-	UserID    string         `gorm:"type:uuid;not null;index" json:"userId"`
-	User      *User          `gorm:"foreignKey:UserID;references:ID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE" json:"user,omitempty"`
-	Company   string         `gorm:"not null" json:"company"`
-	Date      *time.Time     `json:"date,omitempty"`
-	Total     float64        `gorm:"not null" json:"total"`
-	AccessKey string         `gorm:"uniqueIndex;size:44" json:"accessKey,omitempty"`
-	ImageURL  string         `json:"imageUrl,omitempty"`
-	CreatedAt time.Time      `json:"createdAt"`
-	UpdatedAt time.Time      `json:"updatedAt"`
-	DeletedAt gorm.DeletedAt `gorm:"index" json:"-"`
-	Items     []ReceiptItem  `gorm:"foreignKey:ReceiptID;references:ID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE" json:"items,omitempty"`
+	ID                string         `gorm:"primaryKey;type:uuid;default:gen_random_uuid()" json:"id"`
+	UserID            string         `gorm:"type:uuid;not null;index" json:"userId"`
+	User              *User          `gorm:"foreignKey:UserID;references:ID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE" json:"user,omitempty"`
+	Company           string         `gorm:"not null" json:"company"`
+	Date              *time.Time     `json:"date,omitempty"`
+	Total             float64        `gorm:"not null" json:"total"`
+	ReceiptDiscount   float64        `gorm:"not null;default:0" json:"receiptDiscount"`
+	AdditionalCharges float64        `gorm:"not null;default:0" json:"additionalCharges"`
+	AccessKey         string         `gorm:"uniqueIndex;size:44" json:"accessKey,omitempty"`
+	ImageURL          string         `json:"imageUrl,omitempty"`
+	CreatedAt         time.Time      `json:"createdAt"`
+	UpdatedAt         time.Time      `json:"updatedAt"`
+	DeletedAt         gorm.DeletedAt `gorm:"index" json:"-"`
+	Items             []ReceiptItem  `gorm:"foreignKey:ReceiptID;references:ID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE" json:"items,omitempty"`
 }
 
 type ReceiptItem struct {
-	ID            uint           `gorm:"primaryKey" json:"id"`
-	ReceiptID     string         `gorm:"type:uuid;not null;index" json:"receiptId"`
-	Receipt       *Receipt       `gorm:"foreignKey:ReceiptID;references:ID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE" json:"-"`
-	RawName       string         `gorm:"not null" json:"rawName"`
-	Name          string         `gorm:"not null" json:"name"`
-	Brand         string         `json:"brand,omitempty"`
-	Quantity      float64        `gorm:"not null;default:1" json:"quantity"`
-	Unit          string         `gorm:"default:un" json:"unit"`
-	UnitPrice     float64        `gorm:"not null" json:"unitPrice"`
-	TotalPrice    float64        `gorm:"not null" json:"totalPrice"`
-	CategoryID    *uint          `gorm:"index" json:"categoryId,omitempty"`
-	SubcategoryID *uint          `gorm:"index" json:"subcategoryId,omitempty"`
-	Barcode       string         `json:"barcode,omitempty"`
-	CreatedAt     time.Time      `json:"createdAt"`
-	DeletedAt     gorm.DeletedAt `gorm:"index" json:"-"`
-	Category      *Category      `gorm:"foreignKey:CategoryID;references:ID;constraint:OnUpdate:CASCADE,OnDelete:SET NULL" json:"category,omitempty"`
-	Subcategory   *Subcategory   `gorm:"foreignKey:SubcategoryID;references:ID;constraint:OnUpdate:CASCADE,OnDelete:SET NULL" json:"subcategory,omitempty"`
+	ID              uint           `gorm:"primaryKey" json:"id"`
+	ReceiptID       string         `gorm:"type:uuid;not null;index" json:"receiptId"`
+	Receipt         *Receipt       `gorm:"foreignKey:ReceiptID;references:ID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE" json:"-"`
+	RawName         string         `gorm:"not null" json:"rawName"`
+	Name            string         `gorm:"not null" json:"name"`
+	Brand           string         `json:"brand,omitempty"`
+	Quantity        float64        `gorm:"not null;default:1" json:"quantity"`
+	Unit            string         `gorm:"default:un" json:"unit"`
+	UnitPrice       float64        `gorm:"not null" json:"unitPrice"`
+	GrossTotalPrice float64        `gorm:"not null;default:0" json:"grossTotalPrice"`
+	Discount        float64        `gorm:"not null;default:0" json:"discount"`
+	TotalPrice      float64        `gorm:"not null" json:"totalPrice"`
+	CategoryID      *uint          `gorm:"index" json:"categoryId,omitempty"`
+	SubcategoryID   *uint          `gorm:"index" json:"subcategoryId,omitempty"`
+	Barcode         string         `json:"barcode,omitempty"`
+	CreatedAt       time.Time      `json:"createdAt"`
+	DeletedAt       gorm.DeletedAt `gorm:"index" json:"-"`
+	Category        *Category      `gorm:"foreignKey:CategoryID;references:ID;constraint:OnUpdate:CASCADE,OnDelete:SET NULL" json:"category,omitempty"`
+	Subcategory     *Subcategory   `gorm:"foreignKey:SubcategoryID;references:ID;constraint:OnUpdate:CASCADE,OnDelete:SET NULL" json:"subcategory,omitempty"`
 }
 
 type Category struct {
@@ -68,19 +72,23 @@ type ProcessReceiptRequest struct {
 }
 
 type ProcessReceiptResponse struct {
-	Company   string                   `json:"company"`
-	Date      string                   `json:"date,omitempty"`
-	Total     float64                  `json:"total"`
-	AccessKey string                   `json:"accessKey,omitempty"`
-	Items     []map[string]interface{} `json:"items"`
+	Company           string                   `json:"company"`
+	Date              string                   `json:"date,omitempty"`
+	Total             float64                  `json:"total"`
+	ReceiptDiscount   float64                  `json:"receiptDiscount"`
+	AdditionalCharges float64                  `json:"additionalCharges"`
+	AccessKey         string                   `json:"accessKey,omitempty"`
+	Items             []map[string]interface{} `json:"items"`
 }
 
 type SaveReceiptRequest struct {
-	Company   string                   `json:"company" validate:"required"`
-	Date      string                   `json:"date,omitempty"`
-	Total     float64                  `json:"total" validate:"required"`
-	AccessKey string                   `json:"accessKey,omitempty"`
-	Items     []map[string]interface{} `json:"items" validate:"required"`
+	Company           string                   `json:"company" validate:"required"`
+	Date              string                   `json:"date,omitempty"`
+	Total             float64                  `json:"total" validate:"required"`
+	ReceiptDiscount   float64                  `json:"receiptDiscount"`
+	AdditionalCharges float64                  `json:"additionalCharges"`
+	AccessKey         string                   `json:"accessKey,omitempty"`
+	Items             []map[string]interface{} `json:"items" validate:"required"`
 }
 
 type AssistantRequest struct {

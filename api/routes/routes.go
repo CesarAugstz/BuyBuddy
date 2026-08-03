@@ -54,7 +54,7 @@ func Setup(e *echo.Echo, cfg *config.Config, db *gorm.DB) {
 
 	shoppingLists := api.Group("/shopping-lists")
 	shoppingLists.Use(middleware.AuthMiddleware(cfg.JWTSecret))
-	
+
 	// Static routes MUST be registered before parameterized routes
 	shoppingLists.GET("", shoppingListHandler.GetLists)
 	shoppingLists.POST("", shoppingListHandler.CreateList)
@@ -62,7 +62,7 @@ func Setup(e *echo.Echo, cfg *config.Config, db *gorm.DB) {
 	shoppingLists.GET("/invites", shoppingListHandler.GetInvites)
 	shoppingLists.PUT("/invites/:inviteId/accept", shoppingListHandler.AcceptInvite)
 	shoppingLists.PUT("/invites/:inviteId/reject", shoppingListHandler.RejectInvite)
-	
+
 	// Parameterized routes
 	shoppingLists.GET("/:id", shoppingListHandler.GetList)
 	shoppingLists.PUT("/:id", shoppingListHandler.UpdateList)

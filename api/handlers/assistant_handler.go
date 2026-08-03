@@ -72,8 +72,8 @@ func (h *AssistantHandler) AskQuestion(c echo.Context) error {
 
 	prefs, _ := h.prefsRepo.GetOrCreate(userID)
 	assistantModel := prefs.AssistantModel
-	if assistantModel == "" {
-		assistantModel = "gemini-2.5-flash-lite"
+	if !models.IsSupportedGeminiModel(assistantModel) {
+		assistantModel = models.DefaultAssistantModel
 	}
 
 	firstReceiptDate := h.getFirstReceiptDate(userID)

@@ -12,7 +12,7 @@ import (
 	"google.golang.org/genai"
 )
 
-const cheapModel = "gemini-2.5-flash-lite"
+const cheapModel = models.DefaultAssistantModel
 
 const schemaDescription = `Database schema for user receipts:
 
@@ -344,8 +344,8 @@ func GenerateAnswer(ctx context.Context, question string, receipts *models.Compa
 		return "", err
 	}
 
-	if modelName == "" {
-		modelName = "gemini-2.5-flash-lite"
+	if !models.IsSupportedGeminiModel(modelName) {
+		modelName = models.DefaultAssistantModel
 	}
 
 	receiptsJSON, err := json.Marshal(receipts)

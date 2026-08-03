@@ -9,6 +9,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/labstack/echo/v4"
@@ -63,27 +64,24 @@ func (h *ReceiptHandler) ProcessReceipt(c echo.Context) error {
 		}
 	}
 
-	// Get user's previous receipt items for learning
-	receipts, err := h.receiptRepo.GetByUserID(userID)
+	recentItems, err := h.receiptRepo.GetRecentItemsForLearning(userID, 50)
 	if err != nil {
-		receipts = []models.Receipt{} // Continue even if we can't get history
+		recentItems = []models.ReceiptItem{}
 	}
 
-	itemMappings := make([]utils.ItemMapping, 0)
-	for _, receipt := range receipts {
-		for _, item := range receipt.Items {
-			itemMappings = append(itemMappings, utils.ItemMapping{
-				RawName: item.RawName,
-				Name:    item.Name,
-			})
-		}
+	itemMappings := make([]utils.ItemMapping, 0, len(recentItems))
+	for _, item := range recentItems {
+		itemMappings = append(itemMappings, utils.ItemMapping{
+			RawName: item.RawName,
+			Name:    item.Name,
+		})
 	}
 
 	var prefs models.UserPreferences
 	database.DB.Where("user_id = ?", userID).First(&prefs)
 	receiptModel := prefs.ReceiptModel
-	if receiptModel == "" {
-		receiptModel = "gemini-2.5-flash"
+	if !models.IsSupportedGeminiModel(receiptModel) {
+		receiptModel = models.DefaultReceiptModel
 	}
 
 	receiptData, err := utils.ProcessReceiptWithGemini(c.Request().Context(), imageData, geminiKey, categoryInfos, itemMappings, receiptModel)
@@ -95,7 +93,13 @@ func (h *ReceiptHandler) ProcessReceipt(c echo.Context) error {
 		})
 	}
 
-	fmt.Printf("User %s processed receipt: %+v\n", userID, receiptData)
+	fmt.Printf(
+		"Processed receipt for user %s: company=%q items=%d total=%.2f\n",
+		userID,
+		receiptData.Company,
+		len(receiptData.Items),
+		receiptData.Total,
+	)
 
 	return c.JSON(http.StatusOK, receiptData)
 }
@@ -126,54 +130,25 @@ func (h *ReceiptHandler) SaveReceipt(c echo.Context) error {
 	}
 
 	receipt := &models.Receipt{
-		UserID:    userID,
-		Company:   req.Company,
-		Total:     req.Total,
-		AccessKey: req.AccessKey,
-		Items:     []models.ReceiptItem{},
+		UserID:            userID,
+		Company:           req.Company,
+		Total:             req.Total,
+		ReceiptDiscount:   req.ReceiptDiscount,
+		AdditionalCharges: req.AdditionalCharges,
+		AccessKey:         req.AccessKey,
+		Items:             []models.ReceiptItem{},
 	}
 
 	if req.Date != "" {
-		if parsedDate, err := time.Parse(time.RFC3339, req.Date); err == nil {
-			receipt.Date = &parsedDate
+		parsedDate, err := parseReceiptDate(req.Date)
+		if err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, "invalid receipt date")
 		}
+		receipt.Date = &parsedDate
 	}
 
 	for _, item := range req.Items {
-		rawName := getStringFromMap(item, "rawName")
-
-		var name string
-		if customName := getStringFromMap(item, "customName"); customName != "" {
-			name = customName
-		} else if itemName := getStringFromMap(item, "name"); itemName != "" {
-			name = itemName
-		} else if nameOptions, ok := item["nameOptions"].([]interface{}); ok && len(nameOptions) > 0 {
-			if firstOption, ok := nameOptions[0].(string); ok {
-				name = firstOption
-			}
-		}
-
-		if rawName == "" {
-			rawName = name
-		}
-		if name == "" {
-			name = rawName
-		}
-
-		receiptItem := models.ReceiptItem{
-			RawName:    rawName,
-			Name:       name,
-			Brand:      getStringFromMap(item, "brand"),
-			Quantity:   getFloatFromMap(item, "quantity", 1.0),
-			Unit:       getStringFromMap(item, "unit"),
-			UnitPrice:  getFloatFromMap(item, "unitPrice", 0.0),
-			TotalPrice: getFloatFromMap(item, "totalPrice", 0.0),
-			Barcode:    getStringFromMap(item, "barcode"),
-		}
-
-		if receiptItem.Unit == "" {
-			receiptItem.Unit = "un"
-		}
+		receiptItem := buildReceiptItem(item)
 
 		// Try to get category from categoryOptions array (first option)
 		categoryName := ""
@@ -217,6 +192,68 @@ func (h *ReceiptHandler) SaveReceipt(c echo.Context) error {
 	utils.GetFirstReceiptCache().Invalidate(userID)
 
 	return c.JSON(http.StatusCreated, receipt)
+}
+
+func parseReceiptDate(value string) (time.Time, error) {
+	value = strings.TrimSpace(value)
+	layouts := []string{
+		time.RFC3339,
+		"2006-01-02T15:04:05",
+		"2006-01-02 15:04:05",
+		"2006-01-02",
+	}
+
+	for _, layout := range layouts {
+		if parsed, err := time.Parse(layout, value); err == nil {
+			return parsed, nil
+		}
+	}
+
+	return time.Time{}, fmt.Errorf("unsupported receipt date %q", value)
+}
+
+func buildReceiptItem(item map[string]interface{}) models.ReceiptItem {
+	rawName := getStringFromMap(item, "rawName")
+
+	var name string
+	if customName := getStringFromMap(item, "customName"); customName != "" {
+		name = customName
+	} else if itemName := getStringFromMap(item, "name"); itemName != "" {
+		name = itemName
+	} else if nameOptions, ok := item["nameOptions"].([]interface{}); ok && len(nameOptions) > 0 {
+		if firstOption, ok := nameOptions[0].(string); ok {
+			name = firstOption
+		}
+	}
+
+	if rawName == "" {
+		rawName = name
+	}
+	if name == "" {
+		name = rawName
+	}
+
+	unit := getStringFromMap(item, "unit")
+	if unit == "" {
+		unit = "un"
+	}
+
+	totalPrice := getFloatFromMap(item, "totalPrice", 0.0)
+	discount := getFloatFromMap(item, "discount", 0.0)
+	grossTotalPrice := getFloatFromMap(item, "grossTotalPrice", totalPrice+discount)
+
+	return models.ReceiptItem{
+		RawName:         rawName,
+		Name:            name,
+		Brand:           getStringFromMap(item, "brand"),
+		Quantity:        getFloatFromMap(item, "quantity", 1.0),
+		Unit:            unit,
+		UnitPrice:       getFloatFromMap(item, "unitPrice", 0.0),
+		GrossTotalPrice: grossTotalPrice,
+		Discount:        discount,
+		TotalPrice:      totalPrice,
+		Barcode:         getStringFromMap(item, "barcode"),
+	}
 }
 
 func (h *ReceiptHandler) GetReceipts(c echo.Context) error {

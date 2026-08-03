@@ -24,9 +24,23 @@ func (r *ReceiptRepository) GetByUserID(userID string) ([]models.Receipt, error)
 	err := r.db.Where("user_id = ?", userID).
 		Preload("Items.Category").
 		Preload("Items.Subcategory").
-		Order("created_at DESC").
+		Order("COALESCE(date, created_at) DESC").
 		Find(&receipts).Error
 	return receipts, err
+}
+
+func (r *ReceiptRepository) GetRecentItemsForLearning(userID string, limit int) ([]models.ReceiptItem, error) {
+	var items []models.ReceiptItem
+	err := r.db.
+		Select("receipt_items.raw_name, receipt_items.name").
+		Joins("JOIN receipts ON receipts.id = receipt_items.receipt_id").
+		Where("receipts.user_id = ?", userID).
+		Where("receipts.deleted_at IS NULL").
+		Where("receipt_items.deleted_at IS NULL").
+		Order("receipt_items.created_at DESC").
+		Limit(limit).
+		Find(&items).Error
+	return items, err
 }
 
 func (r *ReceiptRepository) GetByID(id string, userID string) (*models.Receipt, error) {
