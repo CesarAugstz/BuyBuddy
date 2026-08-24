@@ -18,10 +18,30 @@ type AssistantQueryFilter struct {
 }
 
 type AssistantIntentResponse struct {
-	Type     string                `json:"type"`
-	Answer   string                `json:"answer,omitempty"`
-	Specific *AssistantQueryFilter `json:"specific,omitempty"`
-	General  *AssistantQueryFilter `json:"general,omitempty"`
+	Type       string                    `json:"type"`
+	Answer     string                    `json:"answer,omitempty"`
+	Specific   *AssistantQueryFilter     `json:"specific,omitempty"`
+	General    *AssistantQueryFilter     `json:"general,omitempty"`
+	Knowledge  *AssistantKnowledgeAction `json:"knowledge,omitempty"`
+	Confidence string                    `json:"confidence,omitempty"`
+}
+
+type AssistantKnowledgeAction struct {
+	Operation       string              `json:"operation"`
+	EntryID         string              `json:"entryId,omitempty"`
+	ExpectedVersion int                 `json:"expectedVersion,omitempty"`
+	TopicID         string              `json:"topicId,omitempty"`
+	Kind            string              `json:"kind,omitempty"`
+	Title           string              `json:"title,omitempty"`
+	Body            string              `json:"body,omitempty"`
+	Attributes      KnowledgeAttributes `json:"attributes,omitempty"`
+	Tags            []string            `json:"tags,omitempty"`
+	OccurredAt      string              `json:"occurredAt,omitempty"`
+	SearchQuery     string              `json:"searchQuery,omitempty"`
+}
+
+type AssistantSuggestionsResponse struct {
+	Suggestions []string `json:"suggestions"`
 }
 
 type CompactReceiptItem struct {
@@ -63,6 +83,7 @@ type CompactProductGroup struct {
 
 type CompactReceiptResponse struct {
 	Legend        map[string]string     `json:"_legend"`
+	QueryStatus   string                `json:"queryStatus"`
 	ProductScope  string                `json:"productScope,omitempty"`
 	ProductGroups []CompactProductGroup `json:"productGroups,omitempty"`
 	Receipts      []CompactReceipt      `json:"receipts"`

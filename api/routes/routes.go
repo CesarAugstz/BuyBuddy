@@ -4,25 +4,30 @@ import (
 	"buybuddy-api/config"
 	"buybuddy-api/handlers"
 	"buybuddy-api/middleware"
+	"buybuddy-api/organizer"
 	"buybuddy-api/repository"
 
 	"github.com/labstack/echo/v4"
+	echomiddleware "github.com/labstack/echo/v4/middleware"
 	"gorm.io/gorm"
 )
 
-func Setup(e *echo.Echo, cfg *config.Config, db *gorm.DB) {
+func Setup(e *echo.Echo, cfg *config.Config, db *gorm.DB) *organizer.Service {
 	userRepo := repository.NewUserRepository(db)
 	receiptRepo := repository.NewReceiptRepository(db)
 	categoryRepo := repository.NewCategoryRepository(db)
 	chatRepo := repository.NewChatRepository(db)
 	prefsRepo := repository.NewPreferencesRepository(db)
 	shoppingListRepo := repository.NewShoppingListRepository(db)
+	knowledgeRepo := repository.NewKnowledgeRepository(db)
+	knowledgeOrganizer := organizer.NewService(knowledgeRepo, cfg.GeminiAPIKey)
 
 	authHandler := handlers.NewAuthHandler(cfg, userRepo)
 	receiptHandler := handlers.NewReceiptHandler(cfg, receiptRepo, categoryRepo)
-	assistantHandler := handlers.NewAssistantHandler(cfg, receiptRepo, chatRepo, prefsRepo, categoryRepo)
+	assistantHandler := handlers.NewAssistantHandler(cfg, receiptRepo, chatRepo, prefsRepo, categoryRepo, knowledgeRepo, knowledgeOrganizer)
 	preferencesHandler := handlers.NewPreferencesHandler(prefsRepo)
 	shoppingListHandler := handlers.NewShoppingListHandler(shoppingListRepo, userRepo)
+	knowledgeHandler := handlers.NewKnowledgeHandler(knowledgeRepo, knowledgeOrganizer)
 
 	e.GET("/health", handlers.Health)
 
@@ -43,7 +48,9 @@ func Setup(e *echo.Echo, cfg *config.Config, db *gorm.DB) {
 
 	assistant := api.Group("/assistant")
 	assistant.Use(middleware.AuthMiddleware(cfg.JWTSecret))
+	assistant.Use(echomiddleware.BodyLimit("32K"))
 	assistant.POST("/ask", assistantHandler.AskQuestion)
+	assistant.GET("/suggestions", assistantHandler.GetSuggestions)
 	assistant.GET("/conversation/:conversationId", assistantHandler.GetConversationHistory)
 
 	preferences := api.Group("/preferences")
@@ -78,4 +85,23 @@ func Setup(e *echo.Echo, cfg *config.Config, db *gorm.DB) {
 	users := api.Group("/users")
 	users.Use(middleware.AuthMiddleware(cfg.JWTSecret))
 	users.GET("/search", shoppingListHandler.SearchUsers)
+
+	knowledge := api.Group("/knowledge")
+	knowledge.Use(middleware.AuthMiddleware(cfg.JWTSecret))
+	knowledge.Use(echomiddleware.BodyLimit("256K"))
+	knowledge.GET("/topics/tree", knowledgeHandler.GetTopicTree)
+	knowledge.GET("/topics", knowledgeHandler.ListTopics)
+	knowledge.POST("/topics", knowledgeHandler.CreateTopic)
+	knowledge.GET("/topics/:id", knowledgeHandler.GetTopic)
+	knowledge.POST("/topics/:id/organize", knowledgeHandler.OrganizeTopic)
+	knowledge.PUT("/topics/:id", knowledgeHandler.UpdateTopic)
+	knowledge.DELETE("/topics/:id", knowledgeHandler.DeleteTopic)
+	knowledge.GET("/topics/:id/entries", knowledgeHandler.ListTopicEntries)
+	knowledge.GET("/entries/:id", knowledgeHandler.GetEntry)
+	knowledge.POST("/entries", knowledgeHandler.CreateEntry)
+	knowledge.PUT("/entries/:id", knowledgeHandler.UpdateEntry)
+	knowledge.DELETE("/entries/:id", knowledgeHandler.DeleteEntry)
+	knowledge.POST("/entries/:id/undo", knowledgeHandler.UndoEntry)
+	knowledge.GET("/search", knowledgeHandler.Search)
+	return knowledgeOrganizer
 }

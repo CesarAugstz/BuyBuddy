@@ -3,17 +3,19 @@ package config
 import (
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 )
 
 type Config struct {
-	Port           string
-	JWTSecret      string
-	GoogleClientID string
-	GeminiAPIKey   string
-	Environment    string
-	CORSOrigins    []string
-	Database       DatabaseConfig
+	Port                      string
+	JWTSecret                 string
+	GoogleClientID            string
+	GeminiAPIKey              string
+	Environment               string
+	CORSOrigins               []string
+	KnowledgeOrganizerEnabled bool
+	Database                  DatabaseConfig
 }
 
 type DatabaseConfig struct {
@@ -34,12 +36,13 @@ func (d DatabaseConfig) ConnectionString() string {
 
 func Load() *Config {
 	return &Config{
-		Port:           getEnv("PORT", "38763"),
-		JWTSecret:      getEnv("JWT_SECRET", "dev-secret-key-change-in-production"),
-		GoogleClientID: getEnv("GOOGLE_CLIENT_ID", ""),
-		GeminiAPIKey:   getEnv("GEMINI_API_KEY", ""),
-		Environment:    getEnv("ENV", "development"),
-		CORSOrigins:    parseOrigins(getEnv("CORS_ORIGINS", "*")),
+		Port:                      getEnv("PORT", "38763"),
+		JWTSecret:                 getEnv("JWT_SECRET", "dev-secret-key-change-in-production"),
+		GoogleClientID:            getEnv("GOOGLE_CLIENT_ID", ""),
+		GeminiAPIKey:              getEnv("GEMINI_API_KEY", ""),
+		Environment:               getEnv("ENV", "development"),
+		CORSOrigins:               parseOrigins(getEnv("CORS_ORIGINS", "*")),
+		KnowledgeOrganizerEnabled: getBoolEnv("KNOWLEDGE_ORGANIZER_ENABLED", false),
 		Database: DatabaseConfig{
 			Host:     getEnv("DB_HOST", "localhost"),
 			Port:     getEnv("DB_PORT", "5432"),
@@ -49,6 +52,18 @@ func Load() *Config {
 			SSLMode:  getEnv("DB_SSLMODE", "disable"),
 		},
 	}
+}
+
+func getBoolEnv(key string, defaultValue bool) bool {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return defaultValue
+	}
+	parsed, err := strconv.ParseBool(value)
+	if err != nil {
+		return defaultValue
+	}
+	return parsed
 }
 
 func getEnv(key, defaultValue string) string {

@@ -34,6 +34,7 @@ services:
       GEMINI_API_KEY: ${GEMINI_API_KEY}
       ENV: ${ENV:-development}
       CORS_ORIGINS: ${CORS_ORIGINS:-*}
+      KNOWLEDGE_ORGANIZER_ENABLED: ${KNOWLEDGE_ORGANIZER_ENABLED:-false}
       DB_HOST: postgres
       DB_PORT: 5432
       DB_NAME: buybuddy
