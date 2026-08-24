@@ -27,6 +27,7 @@ class CacheService {
   static final CacheService _instance = CacheService._internal();
   factory CacheService() => _instance;
   CacheService._internal();
+  CacheService.testing();
 
   final Map<String, CacheEntry> _memoryCache = {};
   static const String _cachePrefix = 'cache_';
@@ -35,20 +36,30 @@ class CacheService {
   static const Duration receiptsTTL = Duration(minutes: 10);
   static const Duration categoriesTTL = Duration(hours: 1);
 
-  Future<T?> get<T>(String key, {bool checkDisk = true}) async {
+  Future<T?> get<T>(
+    String key, {
+    bool checkDisk = true,
+    bool allowExpired = false,
+    bool retainExpiredOnDisk = false,
+  }) async {
     if (_memoryCache.containsKey(key)) {
       final entry = _memoryCache[key]!;
-      print("memory cache hit for key $key: ${entry.toJson()}");
       if (!entry.isExpired) {
         return entry.data as T;
       }
       _memoryCache.remove(key);
+      if (allowExpired) {
+        if (!retainExpiredOnDisk) {
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.remove('$_cachePrefix$key');
+        }
+        return entry.data as T;
+      }
     }
 
     if (checkDisk) {
       final prefs = await SharedPreferences.getInstance();
       final cached = prefs.getString('$_cachePrefix$key');
-      print("cached for key $_cachePrefix$key: $cached");
       if (cached != null) {
         try {
           final entry = CacheEntry.fromJson(jsonDecode(cached));
@@ -56,7 +67,12 @@ class CacheService {
             _memoryCache[key] = entry;
             return entry.data as T;
           }
-          await prefs.remove('$_cachePrefix$key');
+          if (!retainExpiredOnDisk) {
+            await prefs.remove('$_cachePrefix$key');
+          }
+          if (allowExpired) {
+            return entry.data as T;
+          }
         } catch (_) {
           await prefs.remove('$_cachePrefix$key');
         }
@@ -66,7 +82,12 @@ class CacheService {
     return null;
   }
 
-  Future<void> set(String key, dynamic data, {Duration? ttl, bool persistToDisk = false}) async {
+  Future<void> set(
+    String key,
+    dynamic data, {
+    Duration? ttl,
+    bool persistToDisk = false,
+  }) async {
     final entry = CacheEntry(
       data: data,
       timestamp: DateTime.now(),
@@ -88,7 +109,8 @@ class CacheService {
   }
 
   Future<void> invalidatePattern(String pattern) async {
-    final keysToRemove = _memoryCache.keys.where((k) => k.contains(pattern)).toList();
+    final keysToRemove =
+        _memoryCache.keys.where((k) => k.contains(pattern)).toList();
     for (final key in keysToRemove) {
       _memoryCache.remove(key);
     }
@@ -105,12 +127,10 @@ class CacheService {
   Future<void> clearAllCache() async {
     _memoryCache.clear();
     final prefs = await SharedPreferences.getInstance();
-    final keysToRemove = prefs.getKeys().where((k) => k.startsWith(_cachePrefix)).toList();
-    print("removing keys: $keysToRemove");
+    final keysToRemove =
+        prefs.getKeys().where((k) => k.startsWith(_cachePrefix)).toList();
     for (final key in keysToRemove) {
       await prefs.remove(key);
     }
-    print("after remove: ");
-    print("keys: ${prefs.getKeys().where((k) => k.startsWith(_cachePrefix)).toList()}");
   }
 }

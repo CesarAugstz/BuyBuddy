@@ -41,14 +41,16 @@ class ShoppingListItem {
   }
 
   Map<String, dynamic> toJson() => {
-        'id': id,
-        'listId': listId,
-        'name': name,
-        'quantity': quantity,
-        'unit': unit,
-        'isChecked': isChecked,
-        'sortOrder': sortOrder,
-      };
+    'id': id,
+    'listId': listId,
+    'name': name,
+    'quantity': quantity,
+    'unit': unit,
+    'isChecked': isChecked,
+    'sortOrder': sortOrder,
+    'createdAt': createdAt.toIso8601String(),
+    'updatedAt': updatedAt.toIso8601String(),
+  };
 
   ShoppingListItem copyWith({
     String? id,
@@ -96,6 +98,13 @@ class ShoppingListOwner {
       photoUrl: json['photoUrl'],
     );
   }
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'name': name,
+    'email': email,
+    'photoUrl': photoUrl,
+  };
 }
 
 class ShoppingList {
@@ -135,12 +144,14 @@ class ShoppingList {
       title: json['title'] ?? '',
       description: json['description'],
       ownerId: json['ownerId'] ?? '',
-      owner: json['owner'] != null
-          ? ShoppingListOwner.fromJson(json['owner'])
-          : null,
+      owner:
+          json['owner'] != null
+              ? ShoppingListOwner.fromJson(json['owner'])
+              : null,
       createdAt: DateTime.tryParse(json['createdAt'] ?? '') ?? DateTime.now(),
       updatedAt: DateTime.tryParse(json['updatedAt'] ?? '') ?? DateTime.now(),
-      items: (json['items'] as List<dynamic>?)
+      items:
+          (json['items'] as List<dynamic>?)
               ?.map((e) => ShoppingListItem.fromJson(e))
               .toList() ??
           [],
@@ -153,11 +164,20 @@ class ShoppingList {
   }
 
   Map<String, dynamic> toJson() => {
-        'id': id,
-        'title': title,
-        'description': description,
-        'ownerId': ownerId,
-      };
+    'id': id,
+    'title': title,
+    'description': description,
+    'ownerId': ownerId,
+    'owner': owner?.toJson(),
+    'createdAt': createdAt.toIso8601String(),
+    'updatedAt': updatedAt.toIso8601String(),
+    'items': items.map((item) => item.toJson()).toList(),
+    'itemCount': itemCount,
+    'checkedCount': checkedCount,
+    'isShared': isShared,
+    'isOwner': isOwner,
+    'sharedWithCount': sharedWithCount,
+  };
 
   int get uncheckedCount => itemCount - checkedCount;
 
@@ -265,8 +285,11 @@ class ShoppingListService {
     }
   }
 
-  Future<ShoppingList> updateList(String id,
-      {String? title, String? description}) async {
+  Future<ShoppingList> updateList(
+    String id, {
+    String? title,
+    String? description,
+  }) async {
     final token = await _authService.getApiToken();
     if (token == null) throw Exception('Not authenticated');
 
@@ -306,8 +329,12 @@ class ShoppingListService {
     }
   }
 
-  Future<ShoppingListItem> addItem(String listId, String name,
-      {double quantity = 1, String unit = 'un'}) async {
+  Future<ShoppingListItem> addItem(
+    String listId,
+    String name, {
+    double quantity = 1,
+    String unit = 'un',
+  }) async {
     final token = await _authService.getApiToken();
     if (token == null) throw Exception('Not authenticated');
 
@@ -317,11 +344,7 @@ class ShoppingListService {
         'Content-Type': 'application/json',
         'Authorization': 'Bearer $token',
       },
-      body: jsonEncode({
-        'name': name,
-        'quantity': quantity,
-        'unit': unit,
-      }),
+      body: jsonEncode({'name': name, 'quantity': quantity, 'unit': unit}),
     );
 
     if (response.statusCode == 201) {
@@ -383,7 +406,9 @@ class ShoppingListService {
   }
 
   Future<void> reorderItems(
-      String listId, List<Map<String, dynamic>> items) async {
+    String listId,
+    List<Map<String, dynamic>> items,
+  ) async {
     final token = await _authService.getApiToken();
     if (token == null) throw Exception('Not authenticated');
 
@@ -407,7 +432,8 @@ class ShoppingListService {
 
     final response = await http.get(
       Uri.parse(
-          '${ApiConfig.baseUrl}/shopping-lists/suggestions?q=${Uri.encodeComponent(query)}'),
+        '${ApiConfig.baseUrl}/shopping-lists/suggestions?q=${Uri.encodeComponent(query)}',
+      ),
       headers: {
         'Content-Type': 'application/json',
         'Authorization': 'Bearer $token',
@@ -428,7 +454,8 @@ class ShoppingListService {
 
     final response = await http.get(
       Uri.parse(
-          '${ApiConfig.baseUrl}/users/search?email=${Uri.encodeComponent(email)}'),
+        '${ApiConfig.baseUrl}/users/search?email=${Uri.encodeComponent(email)}',
+      ),
       headers: {
         'Content-Type': 'application/json',
         'Authorization': 'Bearer $token',
@@ -529,8 +556,7 @@ class ShoppingListService {
     if (token == null) throw Exception('Not authenticated');
 
     final response = await http.put(
-      Uri.parse(
-          '${ApiConfig.baseUrl}/shopping-lists/invites/$inviteId/accept'),
+      Uri.parse('${ApiConfig.baseUrl}/shopping-lists/invites/$inviteId/accept'),
       headers: {
         'Content-Type': 'application/json',
         'Authorization': 'Bearer $token',
@@ -549,8 +575,7 @@ class ShoppingListService {
     if (token == null) throw Exception('Not authenticated');
 
     final response = await http.put(
-      Uri.parse(
-          '${ApiConfig.baseUrl}/shopping-lists/invites/$inviteId/reject'),
+      Uri.parse('${ApiConfig.baseUrl}/shopping-lists/invites/$inviteId/reject'),
       headers: {
         'Content-Type': 'application/json',
         'Authorization': 'Bearer $token',

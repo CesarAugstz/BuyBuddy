@@ -6,7 +6,10 @@ import 'auth_service.dart';
 class ShoppingAssistantService {
   final _authService = AuthService();
 
-  Future<Map<String, String>> askQuestion(String question, {String? conversationId}) async {
+  Future<Map<String, String>> askQuestion(
+    String question, {
+    String? conversationId,
+  }) async {
     try {
       final token = await _authService.getApiToken();
       if (token == null) {
@@ -22,19 +25,22 @@ class ShoppingAssistantService {
           'conversationId': conversationId,
       };
 
-      final response = await http.post(
-        Uri.parse('${ApiConfig.baseUrl}/assistant/ask'),
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer $token',
-        },
-        body: jsonEncode(requestBody),
-      ).timeout(const Duration(seconds: 30));
+      final response = await http
+          .post(
+            Uri.parse('${ApiConfig.baseUrl}/assistant/ask'),
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': 'Bearer $token',
+            },
+            body: jsonEncode(requestBody),
+          )
+          .timeout(const Duration(seconds: 30));
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
         return {
-          'answer': data['answer'] ?? 'I could not find an answer to your question.',
+          'answer':
+              data['answer'] ?? 'I could not find an answer to your question.',
           'conversationId': data['conversationId'] ?? '',
         };
       } else {
@@ -52,7 +58,9 @@ class ShoppingAssistantService {
     }
   }
 
-  Future<List<Map<String, dynamic>>> getConversationHistory(String conversationId) async {
+  Future<List<Map<String, dynamic>>> getConversationHistory(
+    String conversationId,
+  ) async {
     try {
       final token = await _authService.getApiToken();
       if (token == null) {
@@ -60,7 +68,9 @@ class ShoppingAssistantService {
       }
 
       final response = await http.get(
-        Uri.parse('${ApiConfig.baseUrl}/assistant/conversation/$conversationId'),
+        Uri.parse(
+          '${ApiConfig.baseUrl}/assistant/conversation/$conversationId',
+        ),
         headers: {
           'Content-Type': 'application/json',
           'Authorization': 'Bearer $token',
@@ -75,5 +85,36 @@ class ShoppingAssistantService {
     } catch (_) {
       return [];
     }
+  }
+
+  Future<List<String>> getSuggestions() async {
+    final token = await _authService.getApiToken();
+    if (token == null) {
+      throw Exception('Not authenticated');
+    }
+
+    final response = await http
+        .get(
+          Uri.parse('${ApiConfig.baseUrl}/assistant/suggestions'),
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': ['Bearer', token].join(' '),
+          },
+        )
+        .timeout(const Duration(seconds: 30));
+
+    if (response.statusCode != 200) {
+      throw Exception(
+        'Failed to load assistant suggestions: ${response.statusCode}',
+      );
+    }
+
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    final suggestions = data['suggestions'] as List<dynamic>? ?? const [];
+    return suggestions
+        .whereType<String>()
+        .map((suggestion) => suggestion.trim())
+        .where((suggestion) => suggestion.isNotEmpty)
+        .toList();
   }
 }

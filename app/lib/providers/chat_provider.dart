@@ -3,8 +3,16 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../services/shopping_assistant_service.dart';
 import 'cache_provider.dart';
 
-final shoppingAssistantServiceProvider = Provider<ShoppingAssistantService>((ref) {
+final shoppingAssistantServiceProvider = Provider<ShoppingAssistantService>((
+  ref,
+) {
   return ShoppingAssistantService();
+});
+
+final assistantSuggestionsProvider = FutureProvider.autoDispose<List<String>>((
+  ref,
+) {
+  return ref.read(shoppingAssistantServiceProvider).getSuggestions();
 });
 
 class ChatMessage {
@@ -71,7 +79,8 @@ class ChatNotifier extends Notifier<ChatState> {
   }
 
   ChatMessage _welcomeMessage() => ChatMessage(
-    text: 'Hello! I can help you find information about your purchases. Try asking me:\n\n• "How much did I pay for milk last time?"\n• "Where did I buy bread?"\n• "Show me all my purchases from Walmart"\n• "What was the price of eggs?"',
+    text:
+        'Hello! I can help you find information about your purchases. Try asking me:\n\n• "How much did I pay for milk last time?"\n• "Where did I buy bread?"\n• "Show me all my purchases from Walmart"\n• "What was the price of eggs?"',
     isUser: false,
     timestamp: DateTime.now(),
   );
@@ -85,14 +94,23 @@ class ChatNotifier extends Notifier<ChatState> {
 
       try {
         final service = ref.read(shoppingAssistantServiceProvider);
-        final history = await service.getConversationHistory(lastConversationId);
+        final history = await service.getConversationHistory(
+          lastConversationId,
+        );
 
         if (history.isNotEmpty) {
-          final messages = history.map((m) => ChatMessage(
-            text: m['content'] ?? '',
-            isUser: m['role'] == 'user',
-            timestamp: DateTime.parse(m['createdAt'] ?? DateTime.now().toIso8601String()),
-          )).toList();
+          final messages =
+              history
+                  .map(
+                    (m) => ChatMessage(
+                      text: m['content'] ?? '',
+                      isUser: m['role'] == 'user',
+                      timestamp: DateTime.parse(
+                        m['createdAt'] ?? DateTime.now().toIso8601String(),
+                      ),
+                    ),
+                  )
+                  .toList();
 
           state = ChatState(
             messages: messages,
@@ -125,17 +143,26 @@ class ChatNotifier extends Notifier<ChatState> {
 
     try {
       final service = ref.read(shoppingAssistantServiceProvider);
-      final response = await service.askQuestion(text, conversationId: state.conversationId);
+      final response = await service.askQuestion(
+        text,
+        conversationId: state.conversationId,
+      );
 
-      final newConversationId = response['conversationId'] ?? state.conversationId;
-      
+      final newConversationId =
+          response['conversationId'] ?? state.conversationId;
+
       if (newConversationId != null && newConversationId.isNotEmpty) {
         final cache = ref.read(cacheServiceProvider);
-        await cache.set('last_conversation_id', newConversationId, persistToDisk: true);
+        await cache.set(
+          'last_conversation_id',
+          newConversationId,
+          persistToDisk: true,
+        );
       }
 
       final answer = response['answer'] ?? 'No response';
-      final isError = answer.toLowerCase().contains('error') ||
+      final isError =
+          answer.toLowerCase().contains('error') ||
           answer.toLowerCase().contains('failed') ||
           answer.toLowerCase().contains('please log in');
 
@@ -173,7 +200,7 @@ class ChatNotifier extends Notifier<ChatState> {
 
     final messages = state.messages.where((m) => m != errorMessage).toList();
     state = state.copyWith(messages: messages);
-    
+
     await sendMessage(errorMessage.originalQuestion!);
   }
 

@@ -36,6 +36,11 @@ class _ShoppingListDetailPageState
   @override
   void initState() {
     super.initState();
+    Future.microtask(
+      () => ref
+          .read(shoppingListsProvider.notifier)
+          .markListRecentlyUsed(widget.listId),
+    );
     _addItemController.addListener(() {
       setState(() => _searchQuery = _addItemController.text);
     });
@@ -92,29 +97,28 @@ class _ShoppingListDetailPageState
     try {
       await service.addItem(widget.listId, name);
       _addItemController.clear();
-      ref.invalidate(shoppingListDetailProvider(widget.listId));
-      ref.read(shoppingListsProvider.notifier).refresh();
+      await ref
+          .read(shoppingListDetailProvider(widget.listId).notifier)
+          .refresh();
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to add item: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Failed to add item: $e')));
       }
     }
   }
 
   Future<void> _toggleItem(ShoppingListItem item) async {
-    final service = ref.read(shoppingListServiceProvider);
     try {
-      await service.updateItem(widget.listId, item.id,
-          isChecked: !item.isChecked);
-      ref.invalidate(shoppingListDetailProvider(widget.listId));
-      ref.read(shoppingListsProvider.notifier).refresh();
+      await ref
+          .read(shoppingListDetailProvider(widget.listId).notifier)
+          .toggleItem(item.id);
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to update item: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Failed to update item: $e')));
       }
     }
   }
@@ -123,13 +127,14 @@ class _ShoppingListDetailPageState
     final service = ref.read(shoppingListServiceProvider);
     try {
       await service.deleteItem(widget.listId, item.id);
-      ref.invalidate(shoppingListDetailProvider(widget.listId));
-      ref.read(shoppingListsProvider.notifier).refresh();
+      await ref
+          .read(shoppingListDetailProvider(widget.listId).notifier)
+          .refresh();
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to delete item: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Failed to delete item: $e')));
       }
     }
   }
@@ -144,13 +149,14 @@ class _ShoppingListDetailPageState
     final service = ref.read(shoppingListServiceProvider);
     try {
       await service.updateList(widget.listId, title: title.trim());
-      ref.invalidate(shoppingListDetailProvider(widget.listId));
-      await ref.read(shoppingListsProvider.notifier).refresh();
+      await ref
+          .read(shoppingListDetailProvider(widget.listId).notifier)
+          .refresh();
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to update title: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Failed to update title: $e')));
       }
     } finally {
       _isSavingTitle = false;
@@ -160,21 +166,22 @@ class _ShoppingListDetailPageState
   Future<void> _deleteList() async {
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Delete List'),
-        content: const Text('Are you sure you want to delete this list?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
+      builder:
+          (context) => AlertDialog(
+            title: const Text('Delete List'),
+            content: const Text('Are you sure you want to delete this list?'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('Cancel'),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(context, true),
+                style: TextButton.styleFrom(foregroundColor: Colors.red),
+                child: const Text('Delete'),
+              ),
+            ],
           ),
-          TextButton(
-            onPressed: () => Navigator.pop(context, true),
-            style: TextButton.styleFrom(foregroundColor: Colors.red),
-            child: const Text('Delete'),
-          ),
-        ],
-      ),
     );
 
     if (confirmed != true) return;
@@ -184,9 +191,9 @@ class _ShoppingListDetailPageState
       if (mounted) Navigator.pop(context);
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to delete list: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Failed to delete list: $e')));
       }
     }
   }
@@ -198,39 +205,40 @@ class _ShoppingListDetailPageState
     return Scaffold(
       backgroundColor: Colors.white,
       appBar: AppBar(
-        leading: widget.isNewList && _isEditingTitle
-            ? IconButton(
-                icon: const Icon(Icons.close),
-                onPressed: _cancelNewList,
-              )
-            : null,
+        leading:
+            widget.isNewList && _isEditingTitle
+                ? IconButton(
+                  icon: const Icon(Icons.close),
+                  onPressed: _cancelNewList,
+                )
+                : null,
         title: listAsync.when(
           data: (list) {
             _initTitleForNewList(list.title);
             return _isEditingTitle
                 ? TextField(
-                    controller: _titleController,
-                    focusNode: _titleFocusNode,
-                    decoration: const InputDecoration(
-                      border: InputBorder.none,
-                      hintText: 'List title',
-                    ),
-                    style: const TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w600,
-                    ),
-                    onSubmitted: _updateTitle,
-                  )
+                  controller: _titleController,
+                  focusNode: _titleFocusNode,
+                  decoration: const InputDecoration(
+                    border: InputBorder.none,
+                    hintText: 'List title',
+                  ),
+                  style: const TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w600,
+                  ),
+                  onSubmitted: _updateTitle,
+                )
                 : GestureDetector(
-                    onTap: () {
-                      _titleController.text = list.title;
-                      setState(() => _isEditingTitle = true);
-                    },
-                    child: Text(
-                      list.title,
-                      style: const TextStyle(fontWeight: FontWeight.w600),
-                    ),
-                  );
+                  onTap: () {
+                    _titleController.text = list.title;
+                    setState(() => _isEditingTitle = true);
+                  },
+                  child: Text(
+                    list.title,
+                    style: const TextStyle(fontWeight: FontWeight.w600),
+                  ),
+                );
           },
           loading: () => const Text('Loading...'),
           error: (_, __) => const Text('Error'),
@@ -243,20 +251,24 @@ class _ShoppingListDetailPageState
             )
           else ...[
             listAsync.when(
-              data: (list) => list.isOwner
-                  ? IconButton(
-                      icon: const Icon(Icons.people),
-                      onPressed: () => Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (context) => ShareListPage(
-                            listId: widget.listId,
-                            listTitle: list.title,
-                          ),
-                        ),
-                      ),
-                    )
-                  : const SizedBox.shrink(),
+              data:
+                  (list) =>
+                      list.isOwner
+                          ? IconButton(
+                            icon: const Icon(Icons.people),
+                            onPressed:
+                                () => Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder:
+                                        (context) => ShareListPage(
+                                          listId: widget.listId,
+                                          listTitle: list.title,
+                                        ),
+                                  ),
+                                ),
+                          )
+                          : const SizedBox.shrink(),
               loading: () => const SizedBox.shrink(),
               error: (_, __) => const SizedBox.shrink(),
             ),
@@ -264,18 +276,22 @@ class _ShoppingListDetailPageState
               onSelected: (value) {
                 if (value == 'delete') _deleteList();
               },
-              itemBuilder: (context) => [
-                const PopupMenuItem(
-                  value: 'delete',
-                  child: Row(
-                    children: [
-                      Icon(Icons.delete, color: Colors.red, size: 20),
-                      SizedBox(width: 8),
-                      Text('Delete List', style: TextStyle(color: Colors.red)),
-                    ],
-                  ),
-                ),
-              ],
+              itemBuilder:
+                  (context) => [
+                    const PopupMenuItem(
+                      value: 'delete',
+                      child: Row(
+                        children: [
+                          Icon(Icons.delete, color: Colors.red, size: 20),
+                          SizedBox(width: 8),
+                          Text(
+                            'Delete List',
+                            style: TextStyle(color: Colors.red),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
             ),
           ],
         ],
@@ -283,22 +299,34 @@ class _ShoppingListDetailPageState
       body: listAsync.when(
         data: (list) => _buildListContent(list),
         loading: () => const Center(child: CircularProgressIndicator()),
-        error: (error, _) => Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(Icons.error_outline, size: 64, color: Colors.red.shade300),
-              const SizedBox(height: 16),
-              Text('Error: $error'),
-              const SizedBox(height: 16),
-              ElevatedButton(
-                onPressed: () => ref
-                    .invalidate(shoppingListDetailProvider(widget.listId)),
-                child: const Text('Retry'),
+        error:
+            (error, _) => Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    Icons.error_outline,
+                    size: 64,
+                    color: Colors.red.shade300,
+                  ),
+                  const SizedBox(height: 16),
+                  Text('Error: $error'),
+                  const SizedBox(height: 16),
+                  ElevatedButton(
+                    onPressed:
+                        () =>
+                            ref
+                                .read(
+                                  shoppingListDetailProvider(
+                                    widget.listId,
+                                  ).notifier,
+                                )
+                                .refresh(),
+                    child: const Text('Retry'),
+                  ),
+                ],
               ),
-            ],
-          ),
-        ),
+            ),
       ),
       floatingActionButton: FloatingActionButton(
         onPressed: () {
@@ -355,8 +383,10 @@ class _ShoppingListDetailPageState
                       borderRadius: BorderRadius.circular(8),
                       borderSide: BorderSide(color: Colors.grey.shade300),
                     ),
-                    contentPadding:
-                        const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 12,
+                    ),
                   ),
                   onSubmitted: (_) => _addItem(),
                 ),
@@ -384,9 +414,7 @@ class _ShoppingListDetailPageState
               constraints: const BoxConstraints(maxHeight: 200),
               decoration: BoxDecoration(
                 color: Colors.white,
-                border: Border(
-                  bottom: BorderSide(color: Colors.grey.shade200),
-                ),
+                border: Border(bottom: BorderSide(color: Colors.grey.shade200)),
               ),
               child: ListView.builder(
                 shrinkWrap: true,
@@ -394,7 +422,11 @@ class _ShoppingListDetailPageState
                 itemBuilder: (context, index) {
                   final suggestion = suggestions[index];
                   return ListTile(
-                    leading: Icon(Icons.history, color: Colors.grey.shade400, size: 20),
+                    leading: Icon(
+                      Icons.history,
+                      color: Colors.grey.shade400,
+                      size: 20,
+                    ),
                     title: Text(suggestion),
                     dense: true,
                     onTap: () {
@@ -437,9 +469,8 @@ class _ShoppingListDetailPageState
             color: item.isChecked ? Colors.grey : null,
           ),
         ),
-        subtitle: item.quantity != 1
-            ? Text('${item.quantity} ${item.unit}')
-            : null,
+        subtitle:
+            item.quantity != 1 ? Text('${item.quantity} ${item.unit}') : null,
         contentPadding: EdgeInsets.zero,
       ),
     );
@@ -496,18 +527,12 @@ class _ShoppingListDetailPageState
           const SizedBox(height: 16),
           Text(
             'No items yet',
-            style: TextStyle(
-              fontSize: 16,
-              color: Colors.grey.shade600,
-            ),
+            style: TextStyle(fontSize: 16, color: Colors.grey.shade600),
           ),
           const SizedBox(height: 8),
           Text(
             'Tap + to add your first item',
-            style: TextStyle(
-              fontSize: 14,
-              color: Colors.grey.shade500,
-            ),
+            style: TextStyle(fontSize: 14, color: Colors.grey.shade500),
           ),
         ],
       ),

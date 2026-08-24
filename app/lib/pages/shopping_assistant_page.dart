@@ -9,17 +9,22 @@ class ShoppingAssistantPage extends ConsumerStatefulWidget {
   const ShoppingAssistantPage({super.key});
 
   @override
-  ConsumerState<ShoppingAssistantPage> createState() => _ShoppingAssistantPageState();
+  ConsumerState<ShoppingAssistantPage> createState() =>
+      _ShoppingAssistantPageState();
 }
 
 class _ShoppingAssistantPageState extends ConsumerState<ShoppingAssistantPage> {
   final _messageController = TextEditingController();
   final _scrollController = ScrollController();
+  final _messageFocusNode = FocusNode();
+  final _keyboardFocusNode = FocusNode();
 
   @override
   void dispose() {
     _messageController.dispose();
     _scrollController.dispose();
+    _messageFocusNode.dispose();
+    _keyboardFocusNode.dispose();
     super.dispose();
   }
 
@@ -44,9 +49,23 @@ class _ShoppingAssistantPageState extends ConsumerState<ShoppingAssistantPage> {
     _scrollToBottom();
   }
 
+  void _useSuggestion(String suggestion) {
+    _messageController.text = suggestion;
+    final placeholder = RegExp(r'\{[^{}]+\}').firstMatch(suggestion);
+    _messageController.selection =
+        placeholder == null
+            ? TextSelection.collapsed(offset: suggestion.length)
+            : TextSelection(
+              baseOffset: placeholder.start,
+              extentOffset: placeholder.end,
+            );
+    _messageFocusNode.requestFocus();
+  }
+
   @override
   Widget build(BuildContext context) {
     final chatState = ref.watch(chatProvider);
+    final suggestionsAsync = ref.watch(assistantSuggestionsProvider);
     final messages = chatState.messages;
     final isLoading = chatState.isLoading;
 
@@ -104,7 +123,9 @@ class _ShoppingAssistantPageState extends ConsumerState<ShoppingAssistantPage> {
                           height: 16,
                           child: CircularProgressIndicator(
                             strokeWidth: 2,
-                            valueColor: AlwaysStoppedAnimation(AppTheme.darkGray),
+                            valueColor: AlwaysStoppedAnimation(
+                              AppTheme.darkGray,
+                            ),
                           ),
                         ),
                         const SizedBox(width: 8),
@@ -118,7 +139,7 @@ class _ShoppingAssistantPageState extends ConsumerState<ShoppingAssistantPage> {
                 ],
               ),
             ),
-          _buildInputArea(isLoading),
+          _buildInputArea(isLoading, suggestionsAsync),
         ],
       ),
     );
@@ -137,9 +158,10 @@ class _ShoppingAssistantPageState extends ConsumerState<ShoppingAssistantPage> {
               margin: const EdgeInsets.only(right: 8),
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
-                color: message.isError
-                    ? Colors.red.withOpacity(0.1)
-                    : AppTheme.primaryBlue.withOpacity(0.1),
+                color:
+                    message.isError
+                        ? Colors.red.withValues(alpha: 0.1)
+                        : AppTheme.primaryBlue.withValues(alpha: 0.1),
                 shape: BoxShape.circle,
               ),
               child: Icon(
@@ -150,62 +172,73 @@ class _ShoppingAssistantPageState extends ConsumerState<ShoppingAssistantPage> {
             ),
           Flexible(
             child: Column(
-              crossAxisAlignment: message.isUser
-                  ? CrossAxisAlignment.end
-                  : CrossAxisAlignment.start,
+              crossAxisAlignment:
+                  message.isUser
+                      ? CrossAxisAlignment.end
+                      : CrossAxisAlignment.start,
               children: [
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 12,
+                  ),
                   decoration: BoxDecoration(
-                    color: message.isUser
-                        ? AppTheme.primaryBlue
-                        : message.isError
+                    color:
+                        message.isUser
+                            ? AppTheme.primaryBlue
+                            : message.isError
                             ? Colors.red.shade50
                             : AppTheme.lightGray,
                     borderRadius: BorderRadius.circular(20),
                   ),
-                  child: message.isUser
-                      ? Theme(
-                          data: Theme.of(context).copyWith(
-                            textSelectionTheme: TextSelectionThemeData(
-                              selectionColor: Colors.white.withOpacity(0.4),
+                  child:
+                      message.isUser
+                          ? Theme(
+                            data: Theme.of(context).copyWith(
+                              textSelectionTheme: TextSelectionThemeData(
+                                selectionColor: Colors.white.withValues(
+                                  alpha: 0.4,
+                                ),
+                              ),
+                            ),
+                            child: SelectableText(
+                              message.text,
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 15,
+                              ),
+                            ),
+                          )
+                          : MarkdownBody(
+                            data: message.text,
+                            selectable: true,
+                            styleSheet: MarkdownStyleSheet(
+                              p: TextStyle(
+                                color:
+                                    message.isError
+                                        ? Colors.red.shade900
+                                        : AppTheme.nearBlack,
+                                fontSize: 15,
+                              ),
+                              strong: TextStyle(
+                                color: AppTheme.nearBlack,
+                                fontWeight: FontWeight.bold,
+                              ),
+                              em: TextStyle(
+                                color: AppTheme.nearBlack,
+                                fontStyle: FontStyle.italic,
+                              ),
+                              code: TextStyle(
+                                backgroundColor: Colors.black12,
+                                fontFamily: 'monospace',
+                                fontSize: 14,
+                              ),
+                              listBullet: TextStyle(
+                                color: AppTheme.nearBlack,
+                                fontSize: 15,
+                              ),
                             ),
                           ),
-                          child: SelectableText(
-                            message.text,
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 15,
-                            ),
-                          ),
-                        )
-                      : MarkdownBody(
-                          data: message.text,
-                          selectable: true,
-                          styleSheet: MarkdownStyleSheet(
-                            p: TextStyle(
-                              color: message.isError ? Colors.red.shade900 : AppTheme.nearBlack,
-                              fontSize: 15,
-                            ),
-                            strong: TextStyle(
-                              color: AppTheme.nearBlack,
-                              fontWeight: FontWeight.bold,
-                            ),
-                            em: TextStyle(
-                              color: AppTheme.nearBlack,
-                              fontStyle: FontStyle.italic,
-                            ),
-                            code: TextStyle(
-                              backgroundColor: Colors.black12,
-                              fontFamily: 'monospace',
-                              fontSize: 14,
-                            ),
-                            listBullet: TextStyle(
-                              color: AppTheme.nearBlack,
-                              fontSize: 15,
-                            ),
-                          ),
-                        ),
                 ),
                 if (message.isError && message.originalQuestion != null)
                   Padding(
@@ -229,21 +262,20 @@ class _ShoppingAssistantPageState extends ConsumerState<ShoppingAssistantPage> {
               margin: const EdgeInsets.only(left: 8),
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
-                color: AppTheme.primaryBlue.withOpacity(0.1),
+                color: AppTheme.primaryBlue.withValues(alpha: 0.1),
                 shape: BoxShape.circle,
               ),
-              child: Icon(
-                Icons.person,
-                size: 20,
-                color: AppTheme.primaryBlue,
-              ),
+              child: Icon(Icons.person, size: 20, color: AppTheme.primaryBlue),
             ),
         ],
       ),
     );
   }
 
-  Widget _buildInputArea(bool isLoading) {
+  Widget _buildInputArea(
+    bool isLoading,
+    AsyncValue<List<String>> suggestionsAsync,
+  ) {
     return Container(
       padding: EdgeInsets.only(
         left: 16,
@@ -255,65 +287,109 @@ class _ShoppingAssistantPageState extends ConsumerState<ShoppingAssistantPage> {
         color: Colors.white,
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.05),
+            color: Colors.black.withValues(alpha: 0.05),
             blurRadius: 10,
             offset: const Offset(0, -2),
           ),
         ],
       ),
-      child: Row(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Expanded(
-            child: KeyboardListener(
-              focusNode: FocusNode(),
-              onKeyEvent: (event) {
-                if (event is KeyDownEvent &&
-                    event.logicalKey == LogicalKeyboardKey.enter &&
-                    HardwareKeyboard.instance.isControlPressed) {
-                  _sendMessage();
-                }
-              },
-              child: TextField(
-                controller: _messageController,
-                decoration: InputDecoration(
-                  hintText: 'Ask about your purchases...',
-                  hintStyle: TextStyle(color: AppTheme.darkGray),
-                  filled: true,
-                  fillColor: AppTheme.lightGray,
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(25),
-                    borderSide: BorderSide.none,
-                  ),
-                  enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(25),
-                    borderSide: BorderSide.none,
-                  ),
-                  focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(25),
-                    borderSide: BorderSide.none,
-                  ),
-                  contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 20,
-                    vertical: 12,
+          suggestionsAsync.when(
+            data:
+                (suggestions) =>
+                    suggestions.isEmpty
+                        ? const SizedBox.shrink()
+                        : Padding(
+                          padding: const EdgeInsets.only(bottom: 10),
+                          child: SizedBox(
+                            height: 40,
+                            child: ListView.separated(
+                              scrollDirection: Axis.horizontal,
+                              itemCount: suggestions.length,
+                              separatorBuilder:
+                                  (_, __) => const SizedBox(width: 8),
+                              itemBuilder: (context, index) {
+                                final suggestion = suggestions[index];
+                                return ActionChip(
+                                  avatar: const Icon(
+                                    Icons.auto_awesome,
+                                    size: 16,
+                                  ),
+                                  label: Text(suggestion),
+                                  onPressed: () => _useSuggestion(suggestion),
+                                  backgroundColor: AppTheme.primaryBlue
+                                      .withValues(alpha: 0.08),
+                                  side: BorderSide(
+                                    color: AppTheme.primaryBlue.withValues(
+                                      alpha: 0.2,
+                                    ),
+                                  ),
+                                );
+                              },
+                            ),
+                          ),
+                        ),
+            loading: () => const SizedBox.shrink(),
+            error: (_, __) => const SizedBox.shrink(),
+          ),
+          Row(
+            children: [
+              Expanded(
+                child: KeyboardListener(
+                  focusNode: _keyboardFocusNode,
+                  onKeyEvent: (event) {
+                    if (event is KeyDownEvent &&
+                        event.logicalKey == LogicalKeyboardKey.enter &&
+                        HardwareKeyboard.instance.isControlPressed) {
+                      _sendMessage();
+                    }
+                  },
+                  child: TextField(
+                    controller: _messageController,
+                    focusNode: _messageFocusNode,
+                    decoration: InputDecoration(
+                      hintText: 'Ask about your purchases...',
+                      hintStyle: TextStyle(color: AppTheme.darkGray),
+                      filled: true,
+                      fillColor: AppTheme.lightGray,
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(25),
+                        borderSide: BorderSide.none,
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(25),
+                        borderSide: BorderSide.none,
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(25),
+                        borderSide: BorderSide.none,
+                      ),
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 20,
+                        vertical: 12,
+                      ),
+                    ),
+                    maxLines: null,
+                    keyboardType: TextInputType.multiline,
+                    textCapitalization: TextCapitalization.sentences,
                   ),
                 ),
-                maxLines: null,
-                keyboardType: TextInputType.multiline,
-                textCapitalization: TextCapitalization.sentences,
               ),
-            ),
-          ),
-          const SizedBox(width: 8),
-          Container(
-            decoration: BoxDecoration(
-              color: AppTheme.primaryBlue,
-              shape: BoxShape.circle,
-            ),
-            child: IconButton(
-              icon: const Icon(Icons.send),
-              color: Colors.white,
-              onPressed: isLoading ? null : _sendMessage,
-            ),
+              const SizedBox(width: 8),
+              Container(
+                decoration: BoxDecoration(
+                  color: AppTheme.primaryBlue,
+                  shape: BoxShape.circle,
+                ),
+                child: IconButton(
+                  icon: const Icon(Icons.send),
+                  color: Colors.white,
+                  onPressed: isLoading ? null : _sendMessage,
+                ),
+              ),
+            ],
           ),
         ],
       ),
