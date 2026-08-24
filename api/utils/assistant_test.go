@@ -3,6 +3,8 @@ package utils
 import (
 	"buybuddy-api/models"
 	"encoding/json"
+	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -84,6 +86,64 @@ func TestParseIntentResponseAcceptsStructuredKnowledgeAndRejectsUnknownType(t *t
 	}
 	if _, err := parseIntentResponse(`{"type":"run_sql"}`); err == nil {
 		t.Fatal("unknown intent type unexpectedly accepted")
+	}
+}
+
+func TestParseIntentResponseRejectsReceiptQueryWithoutFilters(t *testing.T) {
+	if _, err := parseIntentResponse(`{"type":"receipt_query","confidence":"high"}`); err == nil {
+		t.Fatal("filterless receipt_query unexpectedly accepted")
+	}
+	if _, err := parseIntentResponse(`{"type":"receipt_query","confidence":"high","specific":{}}`); err == nil {
+		t.Fatal("empty receipt_query filter unexpectedly accepted")
+	}
+
+	limit := 1
+	intent, err := parseIntentResponse(fmt.Sprintf(
+		`{"type":"receipt_query","confidence":"high","specific":{"limit":%d,"orderBy":"date_desc","returnFullReceipt":true}}`,
+		limit,
+	))
+	if err != nil {
+		t.Fatalf("valid receipt_query rejected: %v", err)
+	}
+	if intent.Specific == nil || intent.Specific.Limit == nil || *intent.Specific.Limit != 1 {
+		t.Fatalf("parsed intent = %#v", intent)
+	}
+}
+
+func TestBuildIntentCorrectionPromptIncludesSemanticFailure(t *testing.T) {
+	prompt := buildIntentCorrectionPrompt(
+		"original instructions",
+		`{"type":"receipt_query"}`,
+		fmt.Errorf("receipt_query requires a filter"),
+	)
+	for _, expected := range []string{
+		"original instructions",
+		`{"type":"receipt_query"}`,
+		"receipt_query requires a filter",
+		"complete corrected JSON object",
+	} {
+		if !strings.Contains(prompt, expected) {
+			t.Errorf("correction prompt does not contain %q", expected)
+		}
+	}
+}
+
+func TestReceiptIntentCorrectionSchemaRequiresQueryPlan(t *testing.T) {
+	schema := assistantReceiptIntentCorrectionJSONSchema()
+	required, ok := schema["required"].([]string)
+	if !ok || !slices.Contains(required, "specific") {
+		t.Fatalf("top-level required fields = %#v, want specific", schema["required"])
+	}
+	properties := schema["properties"].(map[string]interface{})
+	specific := properties["specific"].(map[string]interface{})
+	filterRequired, ok := specific["required"].([]string)
+	if !ok {
+		t.Fatalf("specific required fields = %#v", specific["required"])
+	}
+	for _, field := range []string{"limit", "orderBy", "returnFullReceipt"} {
+		if !slices.Contains(filterRequired, field) {
+			t.Errorf("specific schema does not require %q: %#v", field, filterRequired)
+		}
 	}
 }
 

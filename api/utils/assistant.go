@@ -17,6 +17,8 @@ import (
 
 const cheapModel = models.DefaultAssistantModel
 
+var errReceiptQueryMissingFilter = errors.New("receipt_query requires a specific or general receipt filter")
+
 const schemaDescription = `Database schema for user receipts:
 
 RECEIPTS table:
@@ -288,7 +290,44 @@ func parseIntentResponse(response string) (*models.AssistantIntentResponse, erro
 	default:
 		return nil, fmt.Errorf("unsupported assistant intent type %q", intent.Type)
 	}
+	if intent.Type == "receipt_query" &&
+		!hasReceiptQueryInstructions(intent.Specific) &&
+		!hasReceiptQueryInstructions(intent.General) {
+		return nil, errReceiptQueryMissingFilter
+	}
 	return &intent, nil
+}
+
+func hasReceiptQueryInstructions(filter *models.AssistantQueryFilter) bool {
+	if filter == nil {
+		return false
+	}
+	return len(filter.ProductName) > 0 ||
+		len(filter.Company) > 0 ||
+		len(filter.Brand) > 0 ||
+		len(filter.Category) > 0 ||
+		len(filter.Subcategory) > 0 ||
+		filter.DateFrom != "" ||
+		filter.DateTo != "" ||
+		filter.MinPrice != nil ||
+		filter.MaxPrice != nil ||
+		filter.Limit != nil ||
+		filter.OrderBy != "" ||
+		filter.ReturnFullReceipt
+}
+
+func buildIntentCorrectionPrompt(originalPrompt, previousResponse string, responseErr error) string {
+	return fmt.Sprintf(`%s
+
+Your previous JSON response was semantically invalid:
+%s
+
+Validation error: %s
+
+Correct the response so it satisfies the schema and intent rules. In particular,
+a receipt_query must include a specific or general filter describing what to
+query, including limit, ordering, and returnFullReceipt when relevant. Return
+only the complete corrected JSON object.`, originalPrompt, truncateTextRunes(previousResponse, 4000), responseErr)
 }
 
 func DetectIntentAndGenerateQuery(ctx context.Context, question string, conversationHistory []models.ChatMessage, firstReceiptDate *time.Time, categories []models.Category, apiKey string, knowledgeContext ...*models.KnowledgeAssistantContext) (*models.AssistantIntentResponse, error) {
@@ -306,19 +345,21 @@ func DetectIntentAndGenerateQuery(ctx context.Context, question string, conversa
 
 	var intent *models.AssistantIntentResponse
 	var lastErr error
+	attemptPrompt := prompt
+	responseSchema := assistantIntentJSONSchema()
 
 	for attempt := 0; attempt < 2; attempt++ {
 		resp, err := client.Models.GenerateContent(ctx, cheapModel, []*genai.Content{
 			{
 				Role: "user",
 				Parts: []*genai.Part{
-					{Text: prompt},
+					{Text: attemptPrompt},
 				},
 			},
 		}, &genai.GenerateContentConfig{
 			Temperature:        genai.Ptr[float32](0.1),
 			ResponseMIMEType:   "application/json",
-			ResponseJsonSchema: assistantIntentJSONSchema(),
+			ResponseJsonSchema: responseSchema,
 		})
 		if err != nil {
 			lastErr = fmt.Errorf("failed to generate content: %w", err)
@@ -334,6 +375,10 @@ func DetectIntentAndGenerateQuery(ctx context.Context, question string, conversa
 		intent, err = parseIntentResponse(text)
 		if err != nil {
 			lastErr = err
+			attemptPrompt = buildIntentCorrectionPrompt(prompt, text, err)
+			if errors.Is(err, errReceiptQueryMissingFilter) {
+				responseSchema = assistantReceiptIntentCorrectionJSONSchema()
+			}
 			continue
 		}
 
@@ -349,26 +394,7 @@ func assistantIntentJSONSchema() map[string]interface{} {
 		"maxItems": 20,
 		"items":    map[string]interface{}{"type": "string"},
 	}
-	receiptFilter := map[string]interface{}{
-		"type":                 "object",
-		"additionalProperties": false,
-		"properties": map[string]interface{}{
-			"productName":       stringArray,
-			"company":           stringArray,
-			"brand":             stringArray,
-			"category":          stringArray,
-			"subcategory":       stringArray,
-			"dateFrom":          map[string]interface{}{"type": "string"},
-			"dateTo":            map[string]interface{}{"type": "string"},
-			"minPrice":          map[string]interface{}{"type": "number"},
-			"maxPrice":          map[string]interface{}{"type": "number"},
-			"limit":             map[string]interface{}{"type": "integer", "minimum": 1, "maximum": 30},
-			"orderBy":           map[string]interface{}{"type": "string", "enum": []string{"date_desc", "date_asc", "total_desc", "total_asc"}},
-			"returnFullReceipt": map[string]interface{}{"type": "boolean"},
-			"productScope":      map[string]interface{}{"type": "string", "enum": []string{"specific", "generic"}},
-			"productConcept":    map[string]interface{}{"type": "string"},
-		},
-	}
+	receiptFilter := assistantReceiptFilterJSONSchema()
 	knowledge := map[string]interface{}{
 		"type":                 "object",
 		"additionalProperties": false,
@@ -405,6 +431,52 @@ func assistantIntentJSONSchema() map[string]interface{} {
 			"knowledge":  knowledge,
 		},
 		"required": []string{"type"},
+	}
+}
+
+func assistantReceiptFilterJSONSchema() map[string]interface{} {
+	stringArray := map[string]interface{}{
+		"type":     "array",
+		"maxItems": 20,
+		"items":    map[string]interface{}{"type": "string"},
+	}
+	return map[string]interface{}{
+		"type":                 "object",
+		"additionalProperties": false,
+		"properties": map[string]interface{}{
+			"productName":       stringArray,
+			"company":           stringArray,
+			"brand":             stringArray,
+			"category":          stringArray,
+			"subcategory":       stringArray,
+			"dateFrom":          map[string]interface{}{"type": "string"},
+			"dateTo":            map[string]interface{}{"type": "string"},
+			"minPrice":          map[string]interface{}{"type": "number"},
+			"maxPrice":          map[string]interface{}{"type": "number"},
+			"limit":             map[string]interface{}{"type": "integer", "minimum": 1, "maximum": 30},
+			"orderBy":           map[string]interface{}{"type": "string", "enum": []string{"date_desc", "date_asc", "total_desc", "total_asc"}},
+			"returnFullReceipt": map[string]interface{}{"type": "boolean"},
+			"productScope":      map[string]interface{}{"type": "string", "enum": []string{"specific", "generic"}},
+			"productConcept":    map[string]interface{}{"type": "string"},
+		},
+	}
+}
+
+func assistantReceiptIntentCorrectionJSONSchema() map[string]interface{} {
+	receiptFilter := assistantReceiptFilterJSONSchema()
+	receiptFilter["required"] = []string{"limit", "orderBy", "returnFullReceipt"}
+	return map[string]interface{}{
+		"type":                 "object",
+		"additionalProperties": false,
+		"properties": map[string]interface{}{
+			"type": map[string]interface{}{
+				"type": "string",
+				"enum": []string{"receipt_query"},
+			},
+			"confidence": map[string]interface{}{"type": "string", "enum": []string{"high", "medium", "low"}},
+			"specific":   receiptFilter,
+		},
+		"required": []string{"type", "specific"},
 	}
 }
 

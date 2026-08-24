@@ -209,11 +209,8 @@ func TestQueryReceiptsCombinedQueryWithoutFiltersReturnsNoContext(t *testing.T) 
 	}
 
 	receipts, err = handler.queryReceipts("user", &models.AssistantIntentResponse{Type: "receipt_query"})
-	if err != nil {
-		t.Fatalf("receipt-only queryReceipts() error = %v", err)
-	}
-	if receipts == nil || len(receipts.Receipts) != 0 {
-		t.Fatalf("receipt-only queryReceipts() = %#v, want the existing non-nil empty response", receipts)
+	if err == nil {
+		t.Fatalf("receipt-only queryReceipts() = %#v, want missing-filter error", receipts)
 	}
 }
 

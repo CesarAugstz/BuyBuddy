@@ -235,7 +235,7 @@ func (h *AssistantHandler) queryReceipts(userID string, intent *models.Assistant
 		if intent.Type == "combined_query" {
 			return nil, nil
 		}
-		return utils.FormatReceiptsCompact(nil, nil), nil
+		return nil, fmt.Errorf("receipt query is missing filters")
 	}
 
 	var results []models.Receipt
@@ -259,7 +259,6 @@ func (h *AssistantHandler) queryReceipts(userID string, intent *models.Assistant
 	}
 	return utils.FormatReceiptsCompact(results, effectiveFilter), nil
 }
-
 func (h *AssistantHandler) saveInboxFallback(ctx context.Context, userID, originalText string) (string, error) {
 	if err := ctx.Err(); err != nil {
 		return "", err
