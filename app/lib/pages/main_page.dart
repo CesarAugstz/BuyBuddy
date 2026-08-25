@@ -10,6 +10,7 @@ import 'shopping_list_detail_page.dart';
 import 'shopping_lists_page.dart';
 import 'model_settings_page.dart';
 import 'knowledge_explorer_page.dart';
+import 'knowledge_assistant_page.dart';
 
 class MainPage extends ConsumerWidget {
   const MainPage({super.key});
@@ -126,6 +127,19 @@ class MainPage extends ConsumerWidget {
                 Icons.auto_stories_outlined,
                 color: AppTheme.darkGray,
               ),
+              title: Text('Knowledge Assistant'),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => const KnowledgeAssistantPage(),
+                  ),
+                );
+              },
+            ),
+            ListTile(
+              leading: Icon(Icons.folder_outlined, color: AppTheme.darkGray),
               title: Text('Personal Knowledge'),
               onTap: () {
                 Navigator.pop(context);
@@ -294,7 +308,26 @@ class MainPage extends ConsumerWidget {
                         );
                       },
                       icon: Icon(Icons.chat_bubble_outline),
-                      label: Text('Assistant'),
+                      label: Text('Shopping Assistant'),
+                      style: ElevatedButton.styleFrom(
+                        padding: EdgeInsets.symmetric(
+                          horizontal: 24,
+                          vertical: 16,
+                        ),
+                      ),
+                    ),
+                    ElevatedButton.icon(
+                      onPressed: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder:
+                                (context) => const KnowledgeAssistantPage(),
+                          ),
+                        );
+                      },
+                      icon: Icon(Icons.psychology_alt_outlined),
+                      label: Text('Knowledge Assistant'),
                       style: ElevatedButton.styleFrom(
                         padding: EdgeInsets.symmetric(
                           horizontal: 24,

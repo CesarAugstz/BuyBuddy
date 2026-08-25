@@ -1,14 +1,32 @@
 package handlers
 
 import (
+	"buybuddy-api/config"
 	"buybuddy-api/models"
 	"buybuddy-api/repository"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/labstack/echo/v4"
 )
+
+func TestAssistantHandlersHaveOneWayDomainDependencies(t *testing.T) {
+	receiptHandler := reflect.TypeOf(AssistantHandler{})
+	if _, exists := receiptHandler.FieldByName("knowledgeRepo"); exists {
+		t.Fatal("receipt assistant can access the knowledge repository")
+	}
+	knowledgeHandler := reflect.TypeOf(KnowledgeAssistantHandler{})
+	if _, exists := knowledgeHandler.FieldByName("receiptRepo"); exists {
+		t.Fatal("knowledge assistant can access the receipt repository")
+	}
+}
 
 func TestExactAssistantEntryRequiresHighConfidenceAndMatchingVersion(t *testing.T) {
 	context := &models.KnowledgeAssistantContext{
@@ -18,7 +36,7 @@ func TestExactAssistantEntryRequiresHighConfidenceAndMatchingVersion(t *testing.
 			Version: 3,
 		}},
 	}
-	intent := &models.AssistantIntentResponse{
+	intent := &models.KnowledgeAssistantIntentResponse{
 		Type:       "knowledge_change",
 		Confidence: "high",
 		Knowledge: &models.AssistantKnowledgeAction{
@@ -107,11 +125,11 @@ func TestOrganizeKnowledgeFromIntentUsesAuthenticatedUserAndExactContextTopic(t 
 	runner := &fakeKnowledgeOrganizer{response: &models.KnowledgeOrganizationResponse{
 		Result: models.KnowledgeOrganizationApplyResult{OperationsApplied: 2},
 	}}
-	handler := NewAssistantHandler(nil, nil, nil, nil, nil, nil, runner)
+	handler := NewKnowledgeAssistantHandler(nil, nil, nil, nil, runner)
 	knowledgeContext := &models.KnowledgeAssistantContext{
 		Topics: []models.KnowledgeAssistantTopic{{ID: "topic-1", Path: "Projects / BuyBuddy"}},
 	}
-	intent := &models.AssistantIntentResponse{
+	intent := &models.KnowledgeAssistantIntentResponse{
 		Type:       "knowledge_organize",
 		Confidence: "high",
 		Knowledge: &models.AssistantKnowledgeAction{
@@ -134,11 +152,11 @@ func TestOrganizeKnowledgeFromIntentUsesAuthenticatedUserAndExactContextTopic(t 
 
 func TestOrganizeKnowledgeFromIntentRequiresHighConfidenceExactTopic(t *testing.T) {
 	runner := &fakeKnowledgeOrganizer{}
-	handler := &AssistantHandler{organizer: runner}
+	handler := &KnowledgeAssistantHandler{organizer: runner}
 	knowledgeContext := &models.KnowledgeAssistantContext{
 		Topics: []models.KnowledgeAssistantTopic{{ID: "topic-1", Path: "Inbox"}},
 	}
-	intent := &models.AssistantIntentResponse{
+	intent := &models.KnowledgeAssistantIntentResponse{
 		Type:       "knowledge_organize",
 		Confidence: "medium",
 		Knowledge:  &models.AssistantKnowledgeAction{Operation: "organize", TopicID: "topic-1"},
@@ -167,12 +185,12 @@ func TestOrganizeKnowledgeFromIntentReportsNoChangeAndSafeLeaseConflict(t *testi
 	knowledgeContext := &models.KnowledgeAssistantContext{
 		Topics: []models.KnowledgeAssistantTopic{{ID: "topic-1", Path: "Inbox"}},
 	}
-	intent := &models.AssistantIntentResponse{
+	intent := &models.KnowledgeAssistantIntentResponse{
 		Type:       "knowledge_organize",
 		Confidence: "high",
 		Knowledge:  &models.AssistantKnowledgeAction{Operation: "organize", TopicID: "topic-1"},
 	}
-	handler := &AssistantHandler{organizer: &fakeKnowledgeOrganizer{
+	handler := &KnowledgeAssistantHandler{organizer: &fakeKnowledgeOrganizer{
 		response: &models.KnowledgeOrganizationResponse{},
 	}}
 	answer, err := handler.organizeKnowledgeFromIntent(context.Background(), "user", intent, knowledgeContext)
@@ -192,103 +210,241 @@ func TestOrganizeKnowledgeFromIntentReportsNoChangeAndSafeLeaseConflict(t *testi
 func TestSaveInboxFallbackRejectsCanceledContextBeforeRepositoryUse(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	handler := &AssistantHandler{}
+	handler := &KnowledgeAssistantHandler{}
 	if _, err := handler.saveInboxFallback(ctx, "user", "remember this"); !errors.Is(err, context.Canceled) {
 		t.Fatalf("saveInboxFallback() error = %v, want context.Canceled", err)
 	}
 }
 
-func TestQueryReceiptsCombinedQueryWithoutFiltersReturnsNoContext(t *testing.T) {
+func TestQueryReceiptsWithoutFiltersReturnsError(t *testing.T) {
 	handler := &AssistantHandler{}
-	receipts, err := handler.queryReceipts("user", &models.AssistantIntentResponse{Type: "combined_query"})
-	if err != nil {
-		t.Fatalf("queryReceipts() error = %v", err)
-	}
-	if receipts != nil {
-		t.Fatalf("queryReceipts() = %#v, want nil when no receipt query was planned", receipts)
-	}
-
-	receipts, err = handler.queryReceipts("user", &models.AssistantIntentResponse{Type: "receipt_query"})
+	receipts, err := handler.queryReceipts("user", &models.ReceiptAssistantIntentResponse{Type: "receipt_query"})
 	if err == nil {
-		t.Fatalf("receipt-only queryReceipts() = %#v, want missing-filter error", receipts)
+		t.Fatalf("queryReceipts() = %#v, want missing-filter error", receipts)
 	}
 }
 
-func TestFormatKnowledgeResultsDistinguishesReceiptContext(t *testing.T) {
+func TestReceiptDirectIntentEmptyAnswerGetsFallbackBeforePersistence(t *testing.T) {
+	for _, answer := range []string{"", " \t\n"} {
+		got := receiptAssistantAnswerOrFallback(answer)
+		if strings.TrimSpace(got) == "" {
+			t.Fatalf("receiptAssistantAnswerOrFallback(%q) returned an empty answer", answer)
+		}
+		if got != "I couldn't produce a receipt response. Please try again." {
+			t.Fatalf("receiptAssistantAnswerOrFallback(%q) = %q", answer, got)
+		}
+	}
+}
+
+func TestFormatKnowledgeResultsNeverMentionsReceiptContext(t *testing.T) {
 	result := models.KnowledgeSearchResult{
 		Entry: models.KnowledgeEntry{Title: "Milk preference", Body: "Prefers whole milk."},
 	}
-	emptyReceipts := &models.CompactReceiptResponse{Receipts: []models.CompactReceipt{}}
-	matchingReceipts := &models.CompactReceiptResponse{Receipts: []models.CompactReceipt{{ID: "receipt-1"}}}
 
-	if got := formatKnowledgeResults(nil, nil); strings.Contains(strings.ToLower(got), "receipt") {
+	if got := formatKnowledgeResults(nil); strings.Contains(strings.ToLower(got), "receipt") {
 		t.Fatalf("not-queried fallback unexpectedly mentions receipts: %q", got)
 	}
-	if got := formatKnowledgeResults(nil, emptyReceipts); got != "I found no matching personal knowledge or receipts." {
-		t.Fatalf("zero-match fallback = %q", got)
-	}
-	if got := formatKnowledgeResults([]models.KnowledgeSearchResult{result}, emptyReceipts); !strings.Contains(got, "No matching receipts were found.") {
-		t.Fatalf("zero-match fallback does not report receipt query result: %q", got)
-	}
-	if got := formatKnowledgeResults([]models.KnowledgeSearchResult{result}, matchingReceipts); !strings.Contains(got, "combined receipt summary") {
-		t.Fatalf("matching-receipt fallback does not report degraded summary: %q", got)
+	if got := formatKnowledgeResults([]models.KnowledgeSearchResult{result}); strings.Contains(strings.ToLower(got), "receipt") {
+		t.Fatalf("knowledge result unexpectedly mentions receipts: %q", got)
 	}
 }
 
-func TestEnrichReceiptFiltersFromKnowledgeAddsStrictProductAndBrandAttributes(t *testing.T) {
-	intent := &models.AssistantIntentResponse{
-		Type: "combined_query",
-		Specific: &models.AssistantQueryFilter{
-			ProductName:  []string{"milk"},
-			ProductScope: "generic",
-		},
-		General: &models.AssistantQueryFilter{
-			ProductName:  []string{"milk"},
-			ProductScope: "generic",
-		},
-	}
-	results := []models.KnowledgeSearchResult{{
-		Entry: models.KnowledgeEntry{
-			Attributes: models.KnowledgeAttributes{
-				"product": "Milk",
-				"brand":   "Brand X",
+func TestKnowledgeAssistantEndpointDispatchesAllKnowledgeOperationsWithoutReceiptAccess(t *testing.T) {
+	intents := []*models.KnowledgeAssistantIntentResponse{
+		{
+			Type:       "knowledge_write",
+			Confidence: "high",
+			Knowledge: &models.AssistantKnowledgeAction{
+				Operation: "create",
+				TopicID:   "topic-1",
+				Kind:      "recommendation",
+				Title:     "Favorite cafe",
 			},
 		},
-	}}
+		{
+			Type:       "knowledge_query",
+			Confidence: "high",
+			Knowledge:  &models.AssistantKnowledgeAction{Operation: "search", SearchQuery: "cafe"},
+		},
+		{
+			Type:       "knowledge_change",
+			Confidence: "high",
+			Knowledge: &models.AssistantKnowledgeAction{
+				Operation:       "update",
+				EntryID:         "entry-1",
+				ExpectedVersion: 1,
+				Title:           "Updated cafe",
+			},
+		},
+		{
+			Type:       "knowledge_forget",
+			Confidence: "high",
+			Knowledge: &models.AssistantKnowledgeAction{
+				Operation:       "delete",
+				EntryID:         "entry-1",
+				ExpectedVersion: 1,
+			},
+		},
+		{
+			Type:       "knowledge_organize",
+			Confidence: "high",
+			Knowledge:  &models.AssistantKnowledgeAction{Operation: "organize", TopicID: "topic-1"},
+		},
+	}
 
-	enriched := EnrichReceiptFiltersFromKnowledge(intent, results)
-	if got := enriched.Specific.Brand; len(got) != 1 || got[0] != "Brand X" {
-		t.Fatalf("specific brands = %#v, want Brand X", got)
-	}
-	if got := enriched.General.Brand; len(got) != 1 || got[0] != "Brand X" {
-		t.Fatalf("general brands = %#v, want Brand X", got)
-	}
-	if len(enriched.Specific.ProductName) != 1 || enriched.Specific.ProductName[0] != "milk" {
-		t.Fatalf("existing exact product filter was broadened: %#v", enriched.Specific.ProductName)
-	}
-	if len(intent.Specific.Brand) != 0 {
-		t.Fatal("enrichment mutated the classifier intent")
+	for _, intent := range intents {
+		t.Run(intent.Type, func(t *testing.T) {
+			chat := &fakeKnowledgeAssistantChatRepository{}
+			knowledge := newFakeKnowledgeAssistantRepository()
+			organizer := &fakeKnowledgeOrganizer{response: &models.KnowledgeOrganizationResponse{
+				Result: models.KnowledgeOrganizationApplyResult{OperationsApplied: 1},
+			}}
+			handler := &KnowledgeAssistantHandler{
+				cfg:           nil,
+				chatRepo:      chat,
+				prefsRepo:     fakeKnowledgeAssistantPreferencesRepository{},
+				knowledgeRepo: knowledge,
+				organizer:     organizer,
+				detectIntent: func(context.Context, string, []models.ChatMessage, *models.KnowledgeAssistantContext, string) (*models.KnowledgeAssistantIntentResponse, error) {
+					return intent, nil
+				},
+				generateAnswer: func(context.Context, string, []models.KnowledgeSearchResult, []models.ChatMessage, string, string) (string, error) {
+					return "Found the saved cafe.", nil
+				},
+			}
+			handler.cfg = &config.Config{}
+
+			echoServer := echo.New()
+			request := httptest.NewRequest(http.MethodPost, "/api/knowledge/assistant/ask", strings.NewReader(`{"question":"knowledge request"}`))
+			request.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+			recorder := httptest.NewRecorder()
+			echoContext := echoServer.NewContext(request, recorder)
+			echoContext.Set("userID", "authenticated-user")
+
+			if err := handler.AskQuestion(echoContext); err != nil {
+				t.Fatalf("AskQuestion() error = %v", err)
+			}
+			if recorder.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200; body=%s", recorder.Code, recorder.Body.String())
+			}
+			var response models.AssistantResponse
+			if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil || response.ConversationID == "" {
+				t.Fatalf("response = %#v, error = %v", response, err)
+			}
+			if len(chat.messages) != 2 {
+				t.Fatalf("saved messages = %d, want 2", len(chat.messages))
+			}
+			for _, message := range chat.messages {
+				if message.Domain != models.ChatDomainKnowledge {
+					t.Fatalf("saved message domain = %q, want knowledge", message.Domain)
+				}
+			}
+
+			switch intent.Type {
+			case "knowledge_write":
+				if knowledge.created == nil {
+					t.Fatal("create intent did not create knowledge")
+				}
+			case "knowledge_query":
+				if knowledge.searchQuery != "cafe" {
+					t.Fatalf("search query = %q, want cafe", knowledge.searchQuery)
+				}
+			case "knowledge_change":
+				if knowledge.updatedEntryID != "entry-1" {
+					t.Fatal("change intent did not update exact entry")
+				}
+			case "knowledge_forget":
+				if knowledge.deletedEntryID != "entry-1" {
+					t.Fatal("forget intent did not delete exact entry")
+				}
+			case "knowledge_organize":
+				if organizer.userID != "authenticated-user" || organizer.topicID != "topic-1" {
+					t.Fatalf("organizer received %q/%q", organizer.userID, organizer.topicID)
+				}
+			}
+		})
 	}
 }
 
-func TestEnrichReceiptFiltersFromKnowledgeCreatesQueryOnlyWhenAttributesExist(t *testing.T) {
-	intent := &models.AssistantIntentResponse{
-		Type:      "combined_query",
-		Knowledge: &models.AssistantKnowledgeAction{Operation: "search"},
-	}
-	unchanged := EnrichReceiptFiltersFromKnowledge(intent, nil)
-	if unchanged.Specific != nil || unchanged.General != nil {
-		t.Fatalf("filters without product attributes = %#v / %#v, want nil", unchanged.Specific, unchanged.General)
-	}
+type fakeKnowledgeAssistantChatRepository struct {
+	messages []models.ChatMessage
+}
 
-	results := []models.KnowledgeSearchResult{{
-		Entry: models.KnowledgeEntry{Attributes: models.KnowledgeAttributes{
-			"product_name": "Whole milk",
-			"brand":        "Brand X",
+func (f *fakeKnowledgeAssistantChatRepository) CreateMessage(message *models.ChatMessage) error {
+	f.messages = append(f.messages, *message)
+	return nil
+}
+
+func (f *fakeKnowledgeAssistantChatRepository) GetConversationContext(_, _, domain string, _ int) ([]models.ChatMessage, error) {
+	if domain != models.ChatDomainKnowledge {
+		return nil, fmt.Errorf("unexpected conversation domain %q", domain)
+	}
+	return nil, nil
+}
+
+func (f *fakeKnowledgeAssistantChatRepository) GetConversationHistory(_, _, domain string) ([]models.ChatMessage, error) {
+	if domain != models.ChatDomainKnowledge {
+		return nil, fmt.Errorf("unexpected conversation domain %q", domain)
+	}
+	return append([]models.ChatMessage(nil), f.messages...), nil
+}
+
+type fakeKnowledgeAssistantPreferencesRepository struct{}
+
+func (fakeKnowledgeAssistantPreferencesRepository) GetOrCreate(string) (*models.UserPreferences, error) {
+	return &models.UserPreferences{AssistantModel: models.DefaultAssistantModel}, nil
+}
+
+type fakeKnowledgeAssistantRepository struct {
+	context        *models.KnowledgeAssistantContext
+	created        *models.KnowledgeEntry
+	searchQuery    string
+	updatedEntryID string
+	deletedEntryID string
+}
+
+func newFakeKnowledgeAssistantRepository() *fakeKnowledgeAssistantRepository {
+	return &fakeKnowledgeAssistantRepository{context: &models.KnowledgeAssistantContext{
+		Topics: []models.KnowledgeAssistantTopic{{ID: "topic-1", Path: "Recommendations"}},
+		Entries: []models.KnowledgeAssistantEntry{{
+			ID:      "entry-1",
+			TopicID: "topic-1",
+			Title:   "Favorite cafe",
+			Version: 1,
 		}},
 	}}
-	enriched := EnrichReceiptFiltersFromKnowledge(intent, results)
-	if enriched.Specific == nil || len(enriched.Specific.ProductName) != 1 || len(enriched.Specific.Brand) != 1 {
-		t.Fatalf("attribute-driven filters = %#v", enriched.Specific)
+}
+
+func (f *fakeKnowledgeAssistantRepository) AssistantContext(string, string, int, int) (*models.KnowledgeAssistantContext, error) {
+	return f.context, nil
+}
+
+func (f *fakeKnowledgeAssistantRepository) CreateInboxFallback(_ context.Context, _, body, title string) (*models.KnowledgeEntry, bool, error) {
+	entry := &models.KnowledgeEntry{ID: "fallback", TopicID: "topic-1", Title: title, Body: body}
+	f.created = entry
+	return entry, true, nil
+}
+
+func (f *fakeKnowledgeAssistantRepository) CreateEntry(_ string, entry *models.KnowledgeEntry) error {
+	f.created = entry
+	return nil
+}
+
+func (f *fakeKnowledgeAssistantRepository) Search(_ string, filter models.KnowledgeSearchFilter) ([]models.KnowledgeSearchResult, error) {
+	f.searchQuery = filter.Query
+	return []models.KnowledgeSearchResult{{Entry: models.KnowledgeEntry{Title: "Favorite cafe", Body: "Cafe A"}}}, nil
+}
+
+func (f *fakeKnowledgeAssistantRepository) UpdateEntry(_ string, entryID string, _ int, mutation models.KnowledgeEntryMutation, _ string) (*models.KnowledgeEntry, error) {
+	f.updatedEntryID = entryID
+	title := "Favorite cafe"
+	if mutation.Title != nil {
+		title = *mutation.Title
 	}
+	return &models.KnowledgeEntry{ID: entryID, Title: title}, nil
+}
+
+func (f *fakeKnowledgeAssistantRepository) DeleteEntry(_ string, entryID string, _ int, _ string) error {
+	f.deletedEntryID = entryID
+	return nil
 }

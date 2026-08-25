@@ -17,11 +17,17 @@ type AssistantQueryFilter struct {
 	ProductConcept    string   `json:"productConcept,omitempty"`
 }
 
-type AssistantIntentResponse struct {
+type ReceiptAssistantIntentResponse struct {
+	Type       string                `json:"type"`
+	Answer     string                `json:"answer,omitempty"`
+	Specific   *AssistantQueryFilter `json:"specific,omitempty"`
+	General    *AssistantQueryFilter `json:"general,omitempty"`
+	Confidence string                `json:"confidence,omitempty"`
+}
+
+type KnowledgeAssistantIntentResponse struct {
 	Type       string                    `json:"type"`
 	Answer     string                    `json:"answer,omitempty"`
-	Specific   *AssistantQueryFilter     `json:"specific,omitempty"`
-	General    *AssistantQueryFilter     `json:"general,omitempty"`
 	Knowledge  *AssistantKnowledgeAction `json:"knowledge,omitempty"`
 	Confidence string                    `json:"confidence,omitempty"`
 }

@@ -3,15 +3,41 @@ package utils
 import (
 	"buybuddy-api/models"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
 	"testing"
 	"time"
+
+	"google.golang.org/genai"
 )
 
+func TestFirstCandidateTextSafelyHandlesMissingContent(t *testing.T) {
+	tests := []*genai.GenerateContentResponse{
+		nil,
+		{},
+		{Candidates: []*genai.Candidate{nil}},
+		{Candidates: []*genai.Candidate{{Content: nil}}},
+		{Candidates: []*genai.Candidate{{Content: &genai.Content{}}}},
+		{Candidates: []*genai.Candidate{{Content: &genai.Content{Parts: []*genai.Part{nil}}}}},
+	}
+	for index, response := range tests {
+		if text, ok := firstCandidateText(response); ok || text != "" {
+			t.Errorf("case %d firstCandidateText() = %q, %t; want empty, false", index, text, ok)
+		}
+	}
+
+	response := &genai.GenerateContentResponse{Candidates: []*genai.Candidate{{
+		Content: &genai.Content{Parts: []*genai.Part{nil, {Text: `{"type":"direct"}`}}},
+	}}}
+	if text, ok := firstCandidateText(response); !ok || text != `{"type":"direct"}` {
+		t.Fatalf("firstCandidateText() = %q, %t", text, ok)
+	}
+}
+
 func TestBuildIntentPromptRejectsRelatedProductsAndClassifiesScope(t *testing.T) {
-	prompt := buildIntentPrompt(
+	prompt := buildReceiptIntentPrompt(
 		"Quanto paguei em cerveja?",
 		nil,
 		nil,
@@ -30,7 +56,7 @@ func TestBuildIntentPromptRejectsRelatedProductsAndClassifiesScope(t *testing.T)
 	}
 }
 
-func TestBuildIntentPromptConstrainsKnowledgeOperations(t *testing.T) {
+func TestReceiptIntentPromptExcludesKnowledgeOperations(t *testing.T) {
 	context := &models.KnowledgeAssistantContext{
 		Topics: []models.KnowledgeAssistantTopic{{ID: "topic-1", Path: "Projects"}},
 		Entries: []models.KnowledgeAssistantEntry{{
@@ -40,43 +66,44 @@ func TestBuildIntentPromptConstrainsKnowledgeOperations(t *testing.T) {
 			Version: 2,
 		}},
 	}
-	prompt := buildIntentPrompt(
-		"Change my BuyBuddy decision",
+	_ = context
+	prompt := buildReceiptIntentPrompt(
+		"How much did I pay for milk last time?",
 		nil,
 		nil,
 		nil,
 		time.Date(2026, 8, 24, 12, 0, 0, 0, time.UTC),
-		context,
 	)
 	for _, expected := range []string{
-		`"type": "knowledge_query" | "knowledge_change" | "knowledge_forget"`,
-		`"type": "knowledge_organize"`,
-		`"operation": "organize"`,
-		"exactly one supplied topic path clearly matches",
-		"Clean up my Inbox",
+		`"type": "receipt_query"`,
+		`"last purchase" → limit: 1, orderBy: "date_desc"`,
+		"Never create, update, delete, search, or organize personal knowledge",
 		"never return SQL",
-		"Never choose multiple entries",
-		`"entry-1"`,
 	} {
 		if !strings.Contains(prompt, expected) {
 			t.Errorf("prompt does not contain %q", expected)
 		}
 	}
+	for _, forbidden := range []string{"knowledge_write", "knowledge_query", "combined_query", `"entry-1"`} {
+		if strings.Contains(prompt, forbidden) {
+			t.Errorf("receipt prompt contains forbidden knowledge contract %q", forbidden)
+		}
+	}
 }
 
-func TestParseIntentResponseAcceptsStructuredKnowledgeAndRejectsUnknownType(t *testing.T) {
-	intent, err := parseIntentResponse(`{
+func TestParseKnowledgeIntentResponseAcceptsStructuredKnowledgeAndRejectsReceiptType(t *testing.T) {
+	intent, err := parseKnowledgeIntentResponse(`{
 		"type":"knowledge_change",
 		"confidence":"high",
 		"knowledge":{"operation":"update","entryId":"entry-1","expectedVersion":2,"title":"New title"}
 	}`)
 	if err != nil {
-		t.Fatalf("parseIntentResponse() error = %v", err)
+		t.Fatalf("parseKnowledgeIntentResponse() error = %v", err)
 	}
 	if intent.Knowledge == nil || intent.Knowledge.EntryID != "entry-1" || intent.Knowledge.ExpectedVersion != 2 {
 		t.Fatalf("parsed intent = %#v", intent)
 	}
-	organize, err := parseIntentResponse(`{
+	organize, err := parseKnowledgeIntentResponse(`{
 		"type":"knowledge_organize",
 		"confidence":"high",
 		"knowledge":{"operation":"organize","topicId":"topic-1"}
@@ -84,21 +111,27 @@ func TestParseIntentResponseAcceptsStructuredKnowledgeAndRejectsUnknownType(t *t
 	if err != nil || organize.Knowledge == nil || organize.Knowledge.Operation != "organize" {
 		t.Fatalf("parsed organize intent/error = %#v/%v", organize, err)
 	}
-	if _, err := parseIntentResponse(`{"type":"run_sql"}`); err == nil {
+	if _, err := parseKnowledgeIntentResponse(`{"type":"receipt_query","knowledge":{"operation":"search"}}`); err == nil {
+		t.Fatal("receipt intent unexpectedly accepted by knowledge parser")
+	}
+	if _, err := parseKnowledgeIntentResponse(`{"type":"run_sql"}`); err == nil {
 		t.Fatal("unknown intent type unexpectedly accepted")
 	}
 }
 
-func TestParseIntentResponseRejectsReceiptQueryWithoutFilters(t *testing.T) {
-	if _, err := parseIntentResponse(`{"type":"receipt_query","confidence":"high"}`); err == nil {
+func TestParseReceiptIntentResponseRejectsKnowledgeAndQueryWithoutFilters(t *testing.T) {
+	if _, err := parseReceiptIntentResponse(`{"type":"knowledge_write"}`); err == nil {
+		t.Fatal("knowledge intent unexpectedly accepted by receipt parser")
+	}
+	if _, err := parseReceiptIntentResponse(`{"type":"receipt_query","confidence":"high"}`); err == nil {
 		t.Fatal("filterless receipt_query unexpectedly accepted")
 	}
-	if _, err := parseIntentResponse(`{"type":"receipt_query","confidence":"high","specific":{}}`); err == nil {
+	if _, err := parseReceiptIntentResponse(`{"type":"receipt_query","confidence":"high","specific":{}}`); err == nil {
 		t.Fatal("empty receipt_query filter unexpectedly accepted")
 	}
 
 	limit := 1
-	intent, err := parseIntentResponse(fmt.Sprintf(
+	intent, err := parseReceiptIntentResponse(fmt.Sprintf(
 		`{"type":"receipt_query","confidence":"high","specific":{"limit":%d,"orderBy":"date_desc","returnFullReceipt":true}}`,
 		limit,
 	))
@@ -125,6 +158,46 @@ func TestBuildIntentCorrectionPromptIncludesSemanticFailure(t *testing.T) {
 		if !strings.Contains(prompt, expected) {
 			t.Errorf("correction prompt does not contain %q", expected)
 		}
+
+	}
+}
+
+func TestLatestPurchaseSemanticCorrectionProducesExecutableReceiptQuery(t *testing.T) {
+	_, semanticErr := parseReceiptIntentResponse(`{"type":"receipt_query"}`)
+	if !errors.Is(semanticErr, errReceiptQueryMissingFilter) {
+		t.Fatalf("filterless latest-purchase intent error = %v", semanticErr)
+	}
+	original := buildReceiptIntentPrompt(
+		"When did I last buy milk?",
+		nil,
+		nil,
+		nil,
+		time.Date(2026, 8, 25, 12, 0, 0, 0, time.UTC),
+	)
+	correction := buildIntentCorrectionPrompt(
+		original,
+		`{"type":"receipt_query"}`,
+		semanticErr,
+	)
+	if !strings.Contains(correction, "When did I last buy milk?") {
+		t.Fatal("semantic correction lost the original latest-purchase question")
+	}
+
+	intent, err := parseReceiptIntentResponse(`{
+		"type":"receipt_query",
+		"specific":{
+			"productName":["milk"],
+			"limit":1,
+			"orderBy":"date_desc",
+			"returnFullReceipt":false
+		}
+	}`)
+	if err != nil {
+		t.Fatalf("corrected latest-purchase intent rejected: %v", err)
+	}
+	if intent.Specific == nil || intent.Specific.Limit == nil ||
+		*intent.Specific.Limit != 1 || intent.Specific.OrderBy != "date_desc" {
+		t.Fatalf("corrected latest-purchase intent = %#v", intent)
 	}
 }
 
@@ -147,18 +220,37 @@ func TestReceiptIntentCorrectionSchemaRequiresQueryPlan(t *testing.T) {
 	}
 }
 
-func TestAssistantIntentSchemaDoesNotExposeSQLOrUserID(t *testing.T) {
-	schema := assistantIntentJSONSchema()
+func TestReceiptAssistantIntentSchemaExcludesKnowledgeSQLAndUserID(t *testing.T) {
+	schema := receiptAssistantIntentJSONSchema()
 	encoded, err := json.Marshal(schema)
 	if err != nil {
 		t.Fatalf("json.Marshal() error = %v", err)
 	}
 	lower := strings.ToLower(string(encoded))
-	if strings.Contains(lower, `"sql"`) || strings.Contains(lower, `"userid"`) {
+	if strings.Contains(lower, `"sql"`) || strings.Contains(lower, `"userid"`) ||
+		strings.Contains(lower, `"knowledge"`) || strings.Contains(lower, `"combined_query"`) {
 		t.Fatalf("assistant intent schema exposes forbidden fields: %s", encoded)
 	}
-	if !strings.Contains(lower, `"knowledge_organize"`) || !strings.Contains(lower, `"organize"`) {
-		t.Fatalf("assistant intent schema does not expose bounded organize action: %s", encoded)
+	if !strings.Contains(lower, `"receipt_query"`) || !strings.Contains(lower, `"direct"`) {
+		t.Fatalf("receipt assistant schema is missing receipt intents: %s", encoded)
+	}
+}
+
+func TestKnowledgeAssistantIntentSchemaExcludesReceiptAndCombinedTypes(t *testing.T) {
+	encoded, err := json.Marshal(knowledgeAssistantIntentJSONSchema())
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+	lower := strings.ToLower(string(encoded))
+	for _, forbidden := range []string{"receipt_query", "combined_query", "specific", "general", `"sql"`} {
+		if strings.Contains(lower, forbidden) {
+			t.Fatalf("knowledge assistant schema contains %q: %s", forbidden, encoded)
+		}
+	}
+	for _, expected := range []string{"knowledge_write", "knowledge_query", "knowledge_change", "knowledge_forget", "knowledge_organize"} {
+		if !strings.Contains(lower, expected) {
+			t.Errorf("knowledge assistant schema is missing %q", expected)
+		}
 	}
 }
 

@@ -18,28 +18,21 @@ import (
 )
 
 type AssistantHandler struct {
-	cfg           *config.Config
-	receiptRepo   *repository.ReceiptRepository
-	chatRepo      *repository.ChatRepository
-	prefsRepo     *repository.PreferencesRepository
-	categoryRepo  *repository.CategoryRepository
-	knowledgeRepo *repository.KnowledgeRepository
-	organizer     KnowledgeOrganizer
+	cfg          *config.Config
+	receiptRepo  *repository.ReceiptRepository
+	chatRepo     *repository.ChatRepository
+	prefsRepo    *repository.PreferencesRepository
+	categoryRepo *repository.CategoryRepository
 }
 
-func NewAssistantHandler(cfg *config.Config, receiptRepo *repository.ReceiptRepository, chatRepo *repository.ChatRepository, prefsRepo *repository.PreferencesRepository, categoryRepo *repository.CategoryRepository, knowledgeRepo *repository.KnowledgeRepository, organizers ...KnowledgeOrganizer) *AssistantHandler {
-	handler := &AssistantHandler{
-		cfg:           cfg,
-		receiptRepo:   receiptRepo,
-		chatRepo:      chatRepo,
-		prefsRepo:     prefsRepo,
-		categoryRepo:  categoryRepo,
-		knowledgeRepo: knowledgeRepo,
+func NewAssistantHandler(cfg *config.Config, receiptRepo *repository.ReceiptRepository, chatRepo *repository.ChatRepository, prefsRepo *repository.PreferencesRepository, categoryRepo *repository.CategoryRepository) *AssistantHandler {
+	return &AssistantHandler{
+		cfg:          cfg,
+		receiptRepo:  receiptRepo,
+		chatRepo:     chatRepo,
+		prefsRepo:    prefsRepo,
+		categoryRepo: categoryRepo,
 	}
-	if len(organizers) > 0 {
-		handler.organizer = organizers[0]
-	}
-	return handler
 }
 
 func (h *AssistantHandler) getFirstReceiptDate(userID string) *time.Time {
@@ -66,7 +59,6 @@ func (h *AssistantHandler) AskQuestion(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")
 	}
 
-	originalQuestion := req.Question
 	req.Question = strings.TrimSpace(req.Question)
 	if req.Question == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "question is required")
@@ -75,18 +67,21 @@ func (h *AssistantHandler) AskQuestion(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "question must be 2000 characters or fewer")
 	}
 
-	conversationID := req.ConversationID
-	if conversationID == "" {
-		conversationID = uuid.New().String()
+	conversationID, err := assistantConversationID(req.ConversationID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "conversationId must be a valid UUID")
 	}
 
-	conversationHistory, err := h.chatRepo.GetConversationContext(conversationID, userID, 20)
+	conversationHistory, err := h.chatRepo.GetConversationContext(conversationID, userID, models.ChatDomainReceipt, 20)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to fetch conversation history")
 	}
 
-	prefs, _ := h.prefsRepo.GetOrCreate(userID)
-	assistantModel := prefs.AssistantModel
+	assistantModel := models.DefaultAssistantModel
+	prefs, prefsErr := h.prefsRepo.GetOrCreate(userID)
+	if prefsErr == nil && prefs != nil {
+		assistantModel = prefs.AssistantModel
+	}
 	if !models.IsSupportedGeminiModel(assistantModel) {
 		assistantModel = models.DefaultAssistantModel
 	}
@@ -95,31 +90,13 @@ func (h *AssistantHandler) AskQuestion(c echo.Context) error {
 
 	categories, _ := h.categoryRepo.GetAll()
 
-	knowledgeContext, err := h.knowledgeRepo.AssistantContext(userID, req.Question, 50, 20)
-	if err != nil {
-		log.Printf("Failed to initialize knowledge for user %s: %v", userID, err)
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to initialize personal knowledge")
-	}
-
-	intent, err := utils.DetectIntentAndGenerateQuery(c.Request().Context(), req.Question, conversationHistory, firstReceiptDate, categories, h.cfg.GeminiAPIKey, knowledgeContext)
+	intent, err := utils.DetectReceiptIntent(c.Request().Context(), req.Question, conversationHistory, firstReceiptDate, categories, h.cfg.GeminiAPIKey)
 	if err != nil {
 		if c.Request().Context().Err() != nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			return echo.NewHTTPError(http.StatusRequestTimeout, "request was canceled before it could be classified")
 		}
-		if !plausiblyKnowledgeWriteRequest(originalQuestion) {
-			log.Printf("Intent detection failed for user %s; request was not eligible for Inbox fallback: %v", userID, err)
-			return echo.NewHTTPError(http.StatusServiceUnavailable, "assistant request could not be classified; please retry")
-		}
-		log.Printf("Intent detection failed for user %s; using knowledge-write Inbox fallback: %v", userID, err)
-		answer, fallbackErr := h.saveInboxFallback(c.Request().Context(), userID, originalQuestion)
-		if fallbackErr != nil {
-			log.Printf("Failed to save Inbox fallback for user %s: %v", userID, fallbackErr)
-			if errors.Is(fallbackErr, context.Canceled) || errors.Is(fallbackErr, context.DeadlineExceeded) {
-				return echo.NewHTTPError(http.StatusRequestTimeout, "request was canceled before it could be saved")
-			}
-			return echo.NewHTTPError(http.StatusInternalServerError, "knowledge request could not be saved")
-		}
-		intent = &models.AssistantIntentResponse{Type: "direct", Answer: answer}
+		log.Printf("Receipt intent detection failed for user %s: %v", userID, err)
+		return echo.NewHTTPError(http.StatusServiceUnavailable, "assistant request could not be classified; please retry")
 	}
 
 	var answer string
@@ -127,82 +104,31 @@ func (h *AssistantHandler) AskQuestion(c echo.Context) error {
 	switch intent.Type {
 	case "direct":
 		answer = intent.Answer
-	case "query", "receipt_query":
+	case "receipt_query":
 		compactReceipts, queryErr := h.queryReceipts(userID, intent)
 		if queryErr != nil {
 			return echo.NewHTTPError(http.StatusInternalServerError, "failed to query receipt history")
 		}
 		answer, err = utils.GenerateAnswer(c.Request().Context(), req.Question, compactReceipts, conversationHistory, h.cfg.GeminiAPIKey, assistantModel)
 		if err != nil {
+			if requestCanceled(c.Request().Context(), err) {
+				return echo.NewHTTPError(http.StatusRequestTimeout, "request was canceled before an answer could be generated")
+			}
 			fmt.Println("Answer generation error:", err)
 			return echo.NewHTTPError(http.StatusInternalServerError, map[string]string{
 				"message": "Failed to get answer from assistant",
 				"error":   err.Error(),
 			})
 		}
-	case "knowledge_write":
-		if plausiblyKnowledgeOrganizeRequest(originalQuestion) {
-			answer = "I understood this as an organize command, but I couldn't identify one exact topic safely. I did not save it as a knowledge note."
-			break
-		}
-		if intent.Confidence != "high" || intent.Knowledge == nil || intent.Knowledge.Operation != "create" {
-			answer, err = h.saveInboxFallback(c.Request().Context(), userID, originalQuestion)
-			if err != nil {
-				log.Printf("Failed to save ambiguous write to Inbox for user %s: %v", userID, err)
-				if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-					return echo.NewHTTPError(http.StatusRequestTimeout, "request was canceled before it could be saved")
-				}
-				return echo.NewHTTPError(http.StatusInternalServerError, "the request was ambiguous and could not be saved to Inbox")
-			}
-			break
-		}
-		answer, err = h.createKnowledgeFromIntent(userID, originalQuestion, intent.Knowledge, knowledgeContext)
-		if err != nil {
-			log.Printf("Structured knowledge write failed for user %s; using Inbox fallback: %v", userID, err)
-			answer, err = h.saveInboxFallback(c.Request().Context(), userID, originalQuestion)
-			if err != nil {
-				if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-					return echo.NewHTTPError(http.StatusRequestTimeout, "request was canceled before it could be saved")
-				}
-				return echo.NewHTTPError(http.StatusInternalServerError, "knowledge could not be saved")
-			}
-		}
-	case "knowledge_query":
-		answer, err = h.answerKnowledgeQuery(c, userID, req.Question, intent, conversationHistory, assistantModel, nil)
-		if err != nil {
-			return knowledgeHTTPError(err, "failed to search personal knowledge")
-		}
-	case "combined_query":
-		answer, err = h.answerCombinedKnowledgeQuery(c, userID, req.Question, intent, conversationHistory, assistantModel)
-		if err != nil {
-			return knowledgeHTTPError(err, "failed to answer combined question")
-		}
-	case "knowledge_change":
-		answer, err = h.changeKnowledgeFromIntent(userID, intent, knowledgeContext)
-		if err != nil {
-			return knowledgeHTTPError(err, "failed to change personal knowledge")
-		}
-	case "knowledge_forget":
-		answer, err = h.forgetKnowledgeFromIntent(userID, intent, knowledgeContext)
-		if err != nil {
-			return knowledgeHTTPError(err, "failed to forget personal knowledge")
-		}
-	case "knowledge_organize":
-		answer, err = h.organizeKnowledgeFromIntent(c.Request().Context(), userID, intent, knowledgeContext)
-		if err != nil {
-			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-				return echo.NewHTTPError(http.StatusRequestTimeout, "topic organization was interrupted; please try again")
-			}
-			log.Printf("Assistant topic organization failed for user %s: %v", userID, err)
-			return echo.NewHTTPError(http.StatusBadGateway, "topic organization failed; please try again")
-		}
 	default:
-		return echo.NewHTTPError(http.StatusInternalServerError, "unsupported assistant intent")
+		return echo.NewHTTPError(http.StatusInternalServerError, "unsupported receipt assistant intent")
 	}
+	answer = receiptAssistantAnswerOrFallback(answer)
 
 	userMessage := &models.ChatMessage{
 		ConversationID: conversationID,
 		UserID:         userID,
+		Domain:         models.ChatDomainReceipt,
 		Role:           "user",
 		Content:        req.Question,
 	}
@@ -215,6 +141,7 @@ func (h *AssistantHandler) AskQuestion(c echo.Context) error {
 	assistantMessage := &models.ChatMessage{
 		ConversationID: conversationID,
 		UserID:         userID,
+		Domain:         models.ChatDomainReceipt,
 		Role:           "assistant",
 		Content:        answer,
 	}
@@ -230,11 +157,15 @@ func (h *AssistantHandler) AskQuestion(c echo.Context) error {
 	})
 }
 
-func (h *AssistantHandler) queryReceipts(userID string, intent *models.AssistantIntentResponse) (*models.CompactReceiptResponse, error) {
+func receiptAssistantAnswerOrFallback(answer string) string {
+	if strings.TrimSpace(answer) == "" {
+		return "I couldn't produce a receipt response. Please try again."
+	}
+	return answer
+}
+
+func (h *AssistantHandler) queryReceipts(userID string, intent *models.ReceiptAssistantIntentResponse) (*models.CompactReceiptResponse, error) {
 	if intent.Specific == nil && intent.General == nil {
-		if intent.Type == "combined_query" {
-			return nil, nil
-		}
 		return nil, fmt.Errorf("receipt query is missing filters")
 	}
 
@@ -259,7 +190,7 @@ func (h *AssistantHandler) queryReceipts(userID string, intent *models.Assistant
 	}
 	return utils.FormatReceiptsCompact(results, effectiveFilter), nil
 }
-func (h *AssistantHandler) saveInboxFallback(ctx context.Context, userID, originalText string) (string, error) {
+func (h *KnowledgeAssistantHandler) saveInboxFallback(ctx context.Context, userID, originalText string) (string, error) {
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
@@ -401,7 +332,7 @@ func knowledgeFallbackTitle(text string) string {
 	return text
 }
 
-func (h *AssistantHandler) createKnowledgeFromIntent(userID, originalText string, action *models.AssistantKnowledgeAction, context *models.KnowledgeAssistantContext) (string, error) {
+func (h *KnowledgeAssistantHandler) createKnowledgeFromIntent(userID, originalText string, action *models.AssistantKnowledgeAction, context *models.KnowledgeAssistantContext) (string, error) {
 	topicID := strings.TrimSpace(action.TopicID)
 	if topicID == "" || !assistantContextHasTopic(context, topicID) {
 		return "", repository.ErrKnowledgeInvalid
@@ -439,28 +370,15 @@ func (h *AssistantHandler) createKnowledgeFromIntent(userID, originalText string
 	return fmt.Sprintf("Saved **%s** in **%s**.", entry.Title, topicPath), nil
 }
 
-func (h *AssistantHandler) answerKnowledgeQuery(c echo.Context, userID, question string, intent *models.AssistantIntentResponse, conversationHistory []models.ChatMessage, assistantModel string, receipts *models.CompactReceiptResponse) (string, error) {
+func (h *KnowledgeAssistantHandler) answerKnowledgeQuery(c echo.Context, userID, question string, intent *models.KnowledgeAssistantIntentResponse, conversationHistory []models.ChatMessage, assistantModel string) (string, error) {
 	results, err := h.searchKnowledgeForIntent(userID, question, intent)
 	if err != nil {
 		return "", err
 	}
-	return h.generateKnowledgeAnswer(c, userID, question, results, receipts, conversationHistory, assistantModel)
+	return h.generateKnowledgeAnswer(c, userID, question, results, conversationHistory, assistantModel)
 }
 
-func (h *AssistantHandler) answerCombinedKnowledgeQuery(c echo.Context, userID, question string, intent *models.AssistantIntentResponse, conversationHistory []models.ChatMessage, assistantModel string) (string, error) {
-	results, err := h.searchKnowledgeForIntent(userID, question, intent)
-	if err != nil {
-		return "", err
-	}
-	enrichedIntent := EnrichReceiptFiltersFromKnowledge(intent, results)
-	receipts, err := h.queryReceipts(userID, enrichedIntent)
-	if err != nil {
-		return "", err
-	}
-	return h.generateKnowledgeAnswer(c, userID, question, results, receipts, conversationHistory, assistantModel)
-}
-
-func (h *AssistantHandler) searchKnowledgeForIntent(userID, question string, intent *models.AssistantIntentResponse) ([]models.KnowledgeSearchResult, error) {
+func (h *KnowledgeAssistantHandler) searchKnowledgeForIntent(userID, question string, intent *models.KnowledgeAssistantIntentResponse) ([]models.KnowledgeSearchResult, error) {
 	searchQuery := question
 	if intent.Knowledge != nil && strings.TrimSpace(intent.Knowledge.SearchQuery) != "" {
 		searchQuery = intent.Knowledge.SearchQuery
@@ -472,112 +390,19 @@ func (h *AssistantHandler) searchKnowledgeForIntent(userID, question string, int
 	})
 }
 
-func (h *AssistantHandler) generateKnowledgeAnswer(c echo.Context, userID, question string, results []models.KnowledgeSearchResult, receipts *models.CompactReceiptResponse, conversationHistory []models.ChatMessage, assistantModel string) (string, error) {
-	answer, err := utils.GenerateKnowledgeAnswer(c.Request().Context(), question, results, receipts, conversationHistory, h.cfg.GeminiAPIKey, assistantModel)
+func (h *KnowledgeAssistantHandler) generateKnowledgeAnswer(c echo.Context, userID, question string, results []models.KnowledgeSearchResult, conversationHistory []models.ChatMessage, assistantModel string) (string, error) {
+	answer, err := h.generateAnswer(c.Request().Context(), question, results, conversationHistory, h.cfg.GeminiAPIKey, assistantModel)
 	if err != nil {
+		if requestCanceled(c.Request().Context(), err) {
+			return "", err
+		}
 		log.Printf("Knowledge answer generation failed for user %s: %v", userID, err)
-		return formatKnowledgeResults(results, receipts), nil
+		return formatKnowledgeResults(results), nil
 	}
 	return answer, nil
 }
 
-func EnrichReceiptFiltersFromKnowledge(intent *models.AssistantIntentResponse, results []models.KnowledgeSearchResult) *models.AssistantIntentResponse {
-	if intent == nil || intent.Type != "combined_query" {
-		return intent
-	}
-	enriched := *intent
-	enriched.Specific = cloneAssistantQueryFilter(intent.Specific)
-	enriched.General = cloneAssistantQueryFilter(intent.General)
-
-	products, brands := knowledgeProductAttributes(results)
-	enrich := func(filter *models.AssistantQueryFilter) {
-		if filter == nil {
-			return
-		}
-		if len(filter.ProductName) == 0 {
-			filter.ProductName = append([]string(nil), products...)
-		}
-		if len(filter.Brand) == 0 {
-			filter.Brand = append([]string(nil), brands...)
-		}
-	}
-	enrich(enriched.Specific)
-	enrich(enriched.General)
-	if enriched.Specific == nil && (len(products) > 0 || len(brands) > 0) {
-		enriched.Specific = &models.AssistantQueryFilter{
-			ProductName:  append([]string(nil), products...),
-			Brand:        append([]string(nil), brands...),
-			ProductScope: "specific",
-		}
-	}
-	if enriched.General == nil && enriched.Specific != nil {
-		enriched.General = cloneAssistantQueryFilter(enriched.Specific)
-	}
-	return &enriched
-}
-
-func cloneAssistantQueryFilter(filter *models.AssistantQueryFilter) *models.AssistantQueryFilter {
-	if filter == nil {
-		return nil
-	}
-	cloned := *filter
-	cloned.ProductName = append([]string(nil), filter.ProductName...)
-	cloned.Company = append([]string(nil), filter.Company...)
-	cloned.Brand = append([]string(nil), filter.Brand...)
-	cloned.Category = append([]string(nil), filter.Category...)
-	cloned.Subcategory = append([]string(nil), filter.Subcategory...)
-	return &cloned
-}
-
-func knowledgeProductAttributes(results []models.KnowledgeSearchResult) ([]string, []string) {
-	products := make([]string, 0, 10)
-	brands := make([]string, 0, 10)
-	add := func(values *[]string, value string) {
-		value = strings.TrimSpace(value)
-		if value == "" || len([]rune(value)) > 120 || len(*values) == 10 {
-			return
-		}
-		for _, existing := range *values {
-			if strings.EqualFold(existing, value) {
-				return
-			}
-		}
-		*values = append(*values, value)
-	}
-	addValue := func(values *[]string, raw interface{}) {
-		switch value := raw.(type) {
-		case string:
-			add(values, value)
-		case []string:
-			for _, item := range value {
-				add(values, item)
-			}
-		case []interface{}:
-			for _, item := range value {
-				if text, ok := item.(string); ok {
-					add(values, text)
-				}
-			}
-		}
-	}
-	for index, result := range results {
-		if index == 10 {
-			break
-		}
-		for key, value := range result.Entry.Attributes {
-			normalizedKey := strings.ToLower(strings.ReplaceAll(strings.TrimSpace(key), "_", ""))
-			switch normalizedKey {
-			case "product", "productname":
-				addValue(&products, value)
-			case "brand":
-				addValue(&brands, value)
-			}
-		}
-	}
-	return products, brands
-}
-
-func (h *AssistantHandler) changeKnowledgeFromIntent(userID string, intent *models.AssistantIntentResponse, context *models.KnowledgeAssistantContext) (string, error) {
+func (h *KnowledgeAssistantHandler) changeKnowledgeFromIntent(userID string, intent *models.KnowledgeAssistantIntentResponse, context *models.KnowledgeAssistantContext) (string, error) {
 	action, entry, ok := exactAssistantEntry(intent, context)
 	if !ok || action.Operation != "update" {
 		return "I found no single, unambiguous entry to change. Please name the entry more precisely.", nil
@@ -630,7 +455,7 @@ func (h *AssistantHandler) changeKnowledgeFromIntent(userID string, intent *mode
 	return fmt.Sprintf("Updated **%s**. Its previous version is available through undo.", updated.Title), nil
 }
 
-func (h *AssistantHandler) forgetKnowledgeFromIntent(userID string, intent *models.AssistantIntentResponse, context *models.KnowledgeAssistantContext) (string, error) {
+func (h *KnowledgeAssistantHandler) forgetKnowledgeFromIntent(userID string, intent *models.KnowledgeAssistantIntentResponse, context *models.KnowledgeAssistantContext) (string, error) {
 	action, entry, ok := exactAssistantEntry(intent, context)
 	if !ok || action.Operation != "delete" {
 		return "I found no single, unambiguous entry to forget. Please name the entry more precisely; I did not delete anything.", nil
@@ -644,7 +469,7 @@ func (h *AssistantHandler) forgetKnowledgeFromIntent(userID string, intent *mode
 	return fmt.Sprintf("Forgot **%s**. It was soft-deleted and can be restored with undo.", entry.Title), nil
 }
 
-func (h *AssistantHandler) organizeKnowledgeFromIntent(ctx context.Context, userID string, intent *models.AssistantIntentResponse, knowledgeContext *models.KnowledgeAssistantContext) (string, error) {
+func (h *KnowledgeAssistantHandler) organizeKnowledgeFromIntent(ctx context.Context, userID string, intent *models.KnowledgeAssistantIntentResponse, knowledgeContext *models.KnowledgeAssistantContext) (string, error) {
 	action, topic, ok := exactAssistantTopic(intent, knowledgeContext)
 	if !ok || action.Operation != "organize" {
 		return "I couldn't identify one exact topic to organize. Please name a topic from Personal Knowledge more precisely.", nil
@@ -675,7 +500,7 @@ func (h *AssistantHandler) organizeKnowledgeFromIntent(ctx context.Context, user
 	return fmt.Sprintf("Organized **%s** and applied %d changes.", topic.Path, response.Result.OperationsApplied), nil
 }
 
-func exactAssistantTopic(intent *models.AssistantIntentResponse, context *models.KnowledgeAssistantContext) (*models.AssistantKnowledgeAction, *models.KnowledgeAssistantTopic, bool) {
+func exactAssistantTopic(intent *models.KnowledgeAssistantIntentResponse, context *models.KnowledgeAssistantContext) (*models.AssistantKnowledgeAction, *models.KnowledgeAssistantTopic, bool) {
 	if intent == nil || intent.Type != "knowledge_organize" || intent.Confidence != "high" || intent.Knowledge == nil || context == nil {
 		return nil, nil, false
 	}
@@ -689,7 +514,7 @@ func exactAssistantTopic(intent *models.AssistantIntentResponse, context *models
 	return action, nil, false
 }
 
-func exactAssistantEntry(intent *models.AssistantIntentResponse, context *models.KnowledgeAssistantContext) (*models.AssistantKnowledgeAction, *models.KnowledgeAssistantEntry, bool) {
+func exactAssistantEntry(intent *models.KnowledgeAssistantIntentResponse, context *models.KnowledgeAssistantContext) (*models.AssistantKnowledgeAction, *models.KnowledgeAssistantEntry, bool) {
 	if intent == nil || intent.Confidence != "high" || intent.Knowledge == nil || context == nil {
 		return nil, nil, false
 	}
@@ -729,15 +554,9 @@ func truncateAssistantText(value string, maximum int) string {
 	return string(runes[:maximum])
 }
 
-func formatKnowledgeResults(results []models.KnowledgeSearchResult, receipts *models.CompactReceiptResponse) string {
+func formatKnowledgeResults(results []models.KnowledgeSearchResult) string {
 	if len(results) == 0 {
-		if receipts == nil {
-			return "I found no matching personal knowledge."
-		}
-		if len(receipts.Receipts) == 0 {
-			return "I found no matching personal knowledge or receipts."
-		}
-		return "I found no matching personal knowledge. Receipt history was available, but I couldn't generate a combined summary."
+		return "I found no matching personal knowledge."
 	}
 	var builder strings.Builder
 	builder.WriteString("I found:\n")
@@ -751,28 +570,34 @@ func formatKnowledgeResults(results []models.KnowledgeSearchResult, receipts *mo
 		builder.WriteString(truncateAssistantText(result.Entry.Body, 240))
 		builder.WriteString("\n")
 	}
-	if receipts != nil && len(receipts.Receipts) == 0 {
-		builder.WriteString("\nNo matching receipts were found.")
-	} else if receipts != nil {
-		builder.WriteString("\nI couldn't generate the combined receipt summary, so no receipt details were inferred.")
-	}
 	return strings.TrimSpace(builder.String())
 }
 
 func (h *AssistantHandler) GetConversationHistory(c echo.Context) error {
 	userID := c.Get("userID").(string)
-	conversationID := c.Param("conversationId")
-
-	if conversationID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "conversationId is required")
+	conversationID, parseErr := assistantConversationID(c.Param("conversationId"))
+	if parseErr != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "conversationId must be a valid UUID")
 	}
 
-	messages, err := h.chatRepo.GetConversationHistory(conversationID, userID)
+	messages, err := h.chatRepo.GetConversationHistory(conversationID, userID, models.ChatDomainReceipt)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to fetch conversation history")
 	}
 
 	return c.JSON(http.StatusOK, messages)
+}
+
+func assistantConversationID(raw string) (string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return uuid.NewString(), nil
+	}
+	parsed, err := uuid.Parse(raw)
+	if err != nil {
+		return "", err
+	}
+	return parsed.String(), nil
 }
 
 func (h *AssistantHandler) GetSuggestions(c echo.Context) error {
@@ -784,7 +609,7 @@ func (h *AssistantHandler) GetSuggestions(c echo.Context) error {
 		})
 	}
 
-	messages, err := h.chatRepo.GetRecentUserQuestions(userID, 20)
+	messages, err := h.chatRepo.GetRecentUserQuestions(userID, models.ChatDomainReceipt, 20)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to fetch recent questions")
 	}

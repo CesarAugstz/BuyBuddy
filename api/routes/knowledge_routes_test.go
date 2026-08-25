@@ -36,11 +36,59 @@ func TestKnowledgeRoutesIncludeOrganizer(t *testing.T) {
 		"GET /api/knowledge/search",
 		"POST /api/knowledge/entries/:id/undo",
 		"POST /api/knowledge/topics/:id/organize",
+		"POST /api/knowledge/assistant/ask",
+		"GET /api/knowledge/assistant/conversation/:conversationId",
 	}
 	for _, route := range expected {
 		if !routes[route] {
 			t.Errorf("missing route %s", route)
 		}
+	}
+}
+
+func TestAssistantChatRoutesRequireAuthentication(t *testing.T) {
+	echoServer := echo.New()
+	Setup(echoServer, &config.Config{JWTSecret: "test-secret"}, &gorm.DB{})
+
+	for _, target := range []string{
+		"/api/assistant/ask",
+		"/api/assistant/conversation/" + uuid.NewString(),
+		"/api/knowledge/assistant/ask",
+		"/api/knowledge/assistant/conversation/" + uuid.NewString(),
+	} {
+		method := http.MethodGet
+		if strings.HasSuffix(target, "/ask") {
+			method = http.MethodPost
+		}
+		request := httptest.NewRequest(method, target, strings.NewReader(`{"question":"hello"}`))
+		request.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+		recorder := httptest.NewRecorder()
+
+		echoServer.ServeHTTP(recorder, request)
+
+		if recorder.Code != http.StatusUnauthorized {
+			t.Errorf("%s %s status = %d, want %d", method, target, recorder.Code, http.StatusUnauthorized)
+		}
+	}
+}
+
+func TestKnowledgeAssistantAskValidatesRequestContract(t *testing.T) {
+	const secret = "test-secret"
+	echoServer := echo.New()
+	Setup(echoServer, &config.Config{JWTSecret: secret}, &gorm.DB{})
+	token, err := utils.GenerateJWT(uuid.NewString(), "knowledge-chat@example.test", secret)
+	if err != nil {
+		t.Fatalf("GenerateJWT() error = %v", err)
+	}
+	request := httptest.NewRequest(http.MethodPost, "/api/knowledge/assistant/ask", strings.NewReader(`{"question":"   "}`))
+	request.Header.Set(echo.HeaderAuthorization, "Bearer "+token)
+	request.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	recorder := httptest.NewRecorder()
+
+	echoServer.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("empty knowledge question status = %d, want %d; body=%s", recorder.Code, http.StatusBadRequest, recorder.Body.String())
 	}
 }
 

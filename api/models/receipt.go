@@ -106,8 +106,26 @@ type ChatMessage struct {
 	ConversationID string         `gorm:"type:uuid;not null;index" json:"conversationId"`
 	UserID         string         `gorm:"type:uuid;not null;index" json:"userId"`
 	User           *User          `gorm:"foreignKey:UserID;references:ID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE" json:"-"`
+	Domain         string         `gorm:"type:varchar(16);not null;default:receipt;index" json:"domain"`
 	Role           string         `gorm:"not null" json:"role"`
 	Content        string         `gorm:"type:text;not null" json:"content"`
 	CreatedAt      time.Time      `json:"createdAt"`
 	DeletedAt      gorm.DeletedAt `gorm:"index" json:"-"`
+}
+
+const (
+	ChatDomainReceipt   = "receipt"
+	ChatDomainKnowledge = "knowledge"
+)
+
+func NormalizeChatDomain(domain string) string {
+	if domain == ChatDomainKnowledge {
+		return ChatDomainKnowledge
+	}
+	return ChatDomainReceipt
+}
+
+func (message *ChatMessage) BeforeCreate(_ *gorm.DB) error {
+	message.Domain = NormalizeChatDomain(message.Domain)
+	return nil
 }

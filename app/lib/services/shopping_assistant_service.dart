@@ -1,108 +1,163 @@
 import 'dart:convert';
+
 import 'package:http/http.dart' as http;
+
 import '../config/api_config.dart';
 import 'auth_service.dart';
 
-class ShoppingAssistantService {
-  final _authService = AuthService();
+class AssistantChatResponse {
+  const AssistantChatResponse({
+    required this.answer,
+    required this.conversationId,
+    required this.isError,
+    required this.retryable,
+    required this.turnMayHaveBeenPersisted,
+  });
 
-  Future<Map<String, String>> askQuestion(
+  final String answer;
+  final String conversationId;
+  final bool isError;
+  final bool retryable;
+  final bool turnMayHaveBeenPersisted;
+}
+
+abstract interface class AssistantChatApi {
+  Future<AssistantChatResponse> askQuestion(
+    String question, {
+    String? conversationId,
+  });
+
+  Future<List<Map<String, dynamic>>> getConversationHistory(
+    String conversationId,
+  );
+}
+
+abstract interface class ReceiptAssistantApi implements AssistantChatApi {
+  Future<List<String>> getSuggestions();
+}
+
+class ShoppingAssistantService implements ReceiptAssistantApi {
+  ShoppingAssistantService({
+    AuthService? authService,
+    http.Client? client,
+    String assistantPath = '/assistant',
+  }) : _authService = authService ?? AuthService(),
+       _client = client ?? http.Client(),
+       _assistantPath = assistantPath;
+
+  final AuthService _authService;
+  final http.Client _client;
+  final String _assistantPath;
+
+  Future<Map<String, String>> _headers() async {
+    final token = await _authService.getApiToken();
+    if (token == null || token.isEmpty) {
+      throw StateError('Please log in to use the assistant.');
+    }
+    return {
+      'Content-Type': 'application/json',
+      'Authorization': ['Bearer', token].join(' '),
+    };
+  }
+
+  @override
+  Future<AssistantChatResponse> askQuestion(
     String question, {
     String? conversationId,
   }) async {
     try {
-      final token = await _authService.getApiToken();
-      if (token == null) {
-        return {
-          'answer': 'Please log in to use the shopping assistant.',
-          'conversationId': '',
-        };
-      }
-
       final requestBody = {
         'question': question,
         if (conversationId != null && conversationId.isNotEmpty)
           'conversationId': conversationId,
       };
-
-      final response = await http
+      final response = await _client
           .post(
-            Uri.parse('${ApiConfig.baseUrl}/assistant/ask'),
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': 'Bearer $token',
-            },
+            Uri.parse('${ApiConfig.baseUrl}$_assistantPath/ask'),
+            headers: await _headers(),
             body: jsonEncode(requestBody),
           )
           .timeout(const Duration(seconds: 30));
 
       if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        return {
-          'answer':
-              data['answer'] ?? 'I could not find an answer to your question.',
-          'conversationId': data['conversationId'] ?? '',
-        };
-      } else {
-        final error = jsonDecode(response.body);
-        return {
-          'answer': error['message'] ?? 'Failed to get answer from assistant.',
-          'conversationId': conversationId ?? '',
-        };
+        try {
+          final data = jsonDecode(response.body) as Map<String, dynamic>;
+          return AssistantChatResponse(
+            answer:
+                data['answer']?.toString() ??
+                'I could not find an answer to your question.',
+            conversationId: data['conversationId']?.toString() ?? '',
+            isError: false,
+            retryable: false,
+            turnMayHaveBeenPersisted: true,
+          );
+        } catch (_) {
+          return AssistantChatResponse(
+            answer: 'The assistant returned an invalid response.',
+            conversationId: conversationId ?? '',
+            isError: true,
+            retryable: true,
+            turnMayHaveBeenPersisted: true,
+          );
+        }
       }
-    } catch (e) {
-      return {
-        'answer': 'Error: ${e.toString()}',
-        'conversationId': conversationId ?? '',
-      };
+      final error = _decodeError(response.body);
+      return AssistantChatResponse(
+        answer:
+            error ??
+            'The assistant request was not completed (${response.statusCode}).',
+        conversationId: conversationId ?? '',
+        isError: true,
+        retryable: _isRetryableStatus(response.statusCode),
+        turnMayHaveBeenPersisted: false,
+      );
+    } catch (error) {
+      final authenticationError = error is StateError;
+      return AssistantChatResponse(
+        answer:
+            authenticationError
+                ? error.message
+                : 'The assistant request could not be completed. Please try again.',
+        conversationId: conversationId ?? '',
+        isError: true,
+        retryable: !authenticationError,
+        turnMayHaveBeenPersisted: !authenticationError,
+      );
     }
   }
 
+  @override
   Future<List<Map<String, dynamic>>> getConversationHistory(
     String conversationId,
   ) async {
     try {
-      final token = await _authService.getApiToken();
-      if (token == null) {
-        return [];
-      }
+      final response = await _client
+          .get(
+            Uri.parse(
+              '${ApiConfig.baseUrl}$_assistantPath/conversation/$conversationId',
+            ),
+            headers: await _headers(),
+          )
+          .timeout(const Duration(seconds: 30));
+      if (response.statusCode != 200) return [];
 
-      final response = await http.get(
-        Uri.parse(
-          '${ApiConfig.baseUrl}/assistant/conversation/$conversationId',
-        ),
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer $token',
-        },
-      );
-
-      if (response.statusCode == 200) {
-        final List<dynamic> data = jsonDecode(response.body);
-        return data.map((item) => item as Map<String, dynamic>).toList();
-      }
-      return [];
+      final data = jsonDecode(response.body) as List<dynamic>;
+      return data
+          .map((item) => Map<String, dynamic>.from(item as Map))
+          .toList();
     } catch (_) {
       return [];
     }
   }
 
+  @override
   Future<List<String>> getSuggestions() async {
-    final token = await _authService.getApiToken();
-    if (token == null) {
-      throw Exception('Not authenticated');
-    }
-
-    final response = await http
+    final response = await _client
         .get(
-          Uri.parse('${ApiConfig.baseUrl}/assistant/suggestions'),
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': ['Bearer', token].join(' '),
-          },
+          Uri.parse('${ApiConfig.baseUrl}$_assistantPath/suggestions'),
+          headers: await _headers(),
         )
         .timeout(const Duration(seconds: 30));
-
     if (response.statusCode != 200) {
       throw Exception(
         'Failed to load assistant suggestions: ${response.statusCode}',
@@ -116,5 +171,31 @@ class ShoppingAssistantService {
         .map((suggestion) => suggestion.trim())
         .where((suggestion) => suggestion.isNotEmpty)
         .toList();
+  }
+
+  String? _decodeError(String body) {
+    if (body.isEmpty) return null;
+    try {
+      final data = jsonDecode(body);
+      if (data is Map) {
+        final message = data['message'];
+        if (message is String && message.trim().isNotEmpty) {
+          return message;
+        }
+        if (message is Map) {
+          final nestedMessage = message['message'];
+          if (nestedMessage is String && nestedMessage.trim().isNotEmpty) {
+            return nestedMessage;
+          }
+        }
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  bool _isRetryableStatus(int statusCode) {
+    return statusCode == 408 ||
+        statusCode == 429 ||
+        statusCode >= 500 && statusCode <= 599;
   }
 }

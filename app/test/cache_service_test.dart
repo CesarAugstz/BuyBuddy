@@ -30,4 +30,19 @@ void main() {
     expect(value, {'value': 42});
     expect(preferences.containsKey('cache_retained-expired'), isTrue);
   });
+
+  test('long-lived entries remain available beyond the default TTL', () async {
+    final entry = CacheEntry(
+      data: 'conversation-123',
+      timestamp: DateTime.now().subtract(const Duration(days: 30)),
+      ttl: const Duration(days: 90),
+    );
+    SharedPreferences.setMockInitialValues({
+      'cache_long-lived-conversation': jsonEncode(entry.toJson()),
+    });
+
+    final value = await CacheService().get<String>('long-lived-conversation');
+
+    expect(value, 'conversation-123');
+  });
 }
