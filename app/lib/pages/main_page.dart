@@ -250,7 +250,7 @@ class MainPage extends ConsumerWidget {
                 ),
                 SizedBox(height: 32),
                 Text(
-                  'Explore',
+                  'Your tools',
                   style: TextStyle(
                     fontSize: 18,
                     fontWeight: FontWeight.w700,
@@ -258,11 +258,13 @@ class MainPage extends ConsumerWidget {
                   ),
                 ),
                 SizedBox(height: 16),
-                Wrap(
-                  spacing: 16,
-                  runSpacing: 16,
+                _ToolSection(
+                  title: 'Shopping',
                   children: [
-                    ElevatedButton.icon(
+                    _ToolCard(
+                      icon: Icons.receipt_long_outlined,
+                      title: 'Receipts',
+                      description: 'Review your purchase history',
                       onPressed: () {
                         Navigator.push(
                           context,
@@ -271,16 +273,11 @@ class MainPage extends ConsumerWidget {
                           ),
                         );
                       },
-                      icon: Icon(Icons.receipt_long),
-                      label: Text('Receipts'),
-                      style: ElevatedButton.styleFrom(
-                        padding: EdgeInsets.symmetric(
-                          horizontal: 24,
-                          vertical: 16,
-                        ),
-                      ),
                     ),
-                    ElevatedButton.icon(
+                    _ToolCard(
+                      icon: Icons.shopping_cart_outlined,
+                      title: 'Shopping Lists',
+                      description: 'Plan and track what to buy',
                       onPressed: () {
                         Navigator.push(
                           context,
@@ -289,16 +286,11 @@ class MainPage extends ConsumerWidget {
                           ),
                         );
                       },
-                      icon: Icon(Icons.shopping_cart_outlined),
-                      label: Text('Lists'),
-                      style: ElevatedButton.styleFrom(
-                        padding: EdgeInsets.symmetric(
-                          horizontal: 24,
-                          vertical: 16,
-                        ),
-                      ),
                     ),
-                    ElevatedButton.icon(
+                    _ToolCard(
+                      icon: Icons.chat_bubble_outline,
+                      title: 'Shopping Assistant',
+                      description: 'Ask about receipts and prices',
                       onPressed: () {
                         Navigator.push(
                           context,
@@ -307,16 +299,17 @@ class MainPage extends ConsumerWidget {
                           ),
                         );
                       },
-                      icon: Icon(Icons.chat_bubble_outline),
-                      label: Text('Shopping Assistant'),
-                      style: ElevatedButton.styleFrom(
-                        padding: EdgeInsets.symmetric(
-                          horizontal: 24,
-                          vertical: 16,
-                        ),
-                      ),
                     ),
-                    ElevatedButton.icon(
+                  ],
+                ),
+                const SizedBox(height: 24),
+                _ToolSection(
+                  title: 'Knowledge',
+                  children: [
+                    _ToolCard(
+                      icon: Icons.psychology_alt_outlined,
+                      title: 'Knowledge Assistant',
+                      description: 'Save and manage personal notes',
                       onPressed: () {
                         Navigator.push(
                           context,
@@ -326,16 +319,11 @@ class MainPage extends ConsumerWidget {
                           ),
                         );
                       },
-                      icon: Icon(Icons.psychology_alt_outlined),
-                      label: Text('Knowledge Assistant'),
-                      style: ElevatedButton.styleFrom(
-                        padding: EdgeInsets.symmetric(
-                          horizontal: 24,
-                          vertical: 16,
-                        ),
-                      ),
                     ),
-                    ElevatedButton.icon(
+                    _ToolCard(
+                      icon: Icons.folder_outlined,
+                      title: 'Personal Knowledge',
+                      description: 'Browse your topics and entries',
                       onPressed: () {
                         Navigator.push(
                           context,
@@ -344,16 +332,131 @@ class MainPage extends ConsumerWidget {
                           ),
                         );
                       },
-                      icon: Icon(Icons.auto_stories_outlined),
-                      label: Text('Personal Knowledge'),
-                      style: ElevatedButton.styleFrom(
-                        padding: EdgeInsets.symmetric(
-                          horizontal: 24,
-                          vertical: 16,
-                        ),
-                      ),
                     ),
                   ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ToolSection extends StatelessWidget {
+  const _ToolSection({required this.title, required this.children});
+
+  final String title;
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          title,
+          style: TextStyle(
+            color: AppTheme.darkGray,
+            fontSize: 14,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        const SizedBox(height: 10),
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final columns = constraints.maxWidth >= 360 ? 2 : 1;
+            const spacing = 12.0;
+            final cardWidth =
+                (constraints.maxWidth - spacing * (columns - 1)) / columns;
+            return Wrap(
+              spacing: spacing,
+              runSpacing: spacing,
+              children: [
+                for (final child in children)
+                  SizedBox(width: cardWidth, child: child),
+              ],
+            );
+          },
+        ),
+      ],
+    );
+  }
+}
+
+class _ToolCard extends StatelessWidget {
+  const _ToolCard({
+    required this.icon,
+    required this.title,
+    required this.description,
+    required this.onPressed,
+  });
+
+  final IconData icon;
+  final String title;
+  final String description;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      color: Colors.white,
+      elevation: 0,
+      margin: EdgeInsets.zero,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: BorderSide(color: AppTheme.mediumGray),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onPressed,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(minHeight: 156),
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(11),
+                      decoration: BoxDecoration(
+                        color: AppTheme.primaryBlue.withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(11),
+                      ),
+                      child: Icon(icon, color: AppTheme.primaryBlue, size: 24),
+                    ),
+                    Icon(
+                      Icons.arrow_forward_ios,
+                      size: 15,
+                      color: AppTheme.darkGray,
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  title,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: AppTheme.nearBlack,
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 5),
+                Text(
+                  description,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: AppTheme.darkGray,
+                    fontSize: 12.5,
+                    height: 1.25,
+                  ),
                 ),
               ],
             ),
