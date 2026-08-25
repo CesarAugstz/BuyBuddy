@@ -119,6 +119,64 @@ func TestParseKnowledgeIntentResponseAcceptsStructuredKnowledgeAndRejectsReceipt
 	}
 }
 
+func TestInspectKnowledgeIntentResponseLogsMetadataWithoutValues(t *testing.T) {
+	response := `{
+		"type":"knowledge_query",
+		"confidence":"high",
+		"knowledge":{
+			"operation":"create",
+			"entryId":"private-entry-id",
+			"topicId":"private-topic-id",
+			"searchQuery":"private search terms"
+		}
+	}`
+
+	diagnostic := inspectKnowledgeIntentResponse(response)
+
+	if diagnostic.Type != "knowledge_query" ||
+		diagnostic.Operation != "create" ||
+		diagnostic.Confidence != "high" ||
+		!diagnostic.HasKnowledge ||
+		!diagnostic.EntryIDPresent ||
+		!diagnostic.TopicIDPresent ||
+		diagnostic.SearchQueryChars != len([]rune("private search terms")) ||
+		len(diagnostic.Fingerprint) != 12 {
+		t.Fatalf("unexpected diagnostic: %#v", diagnostic)
+	}
+	rendered := fmt.Sprintf("%+v", diagnostic)
+	for _, privateValue := range []string{
+		"private-entry-id",
+		"private-topic-id",
+		"private search terms",
+	} {
+		if strings.Contains(rendered, privateValue) {
+			t.Errorf("diagnostic leaked %q: %s", privateValue, rendered)
+		}
+	}
+}
+
+func TestKnowledgeIntentCorrectionSchemaRequiresMatchingOperation(t *testing.T) {
+	schema := knowledgeAssistantIntentCorrectionJSONSchema(
+		"knowledge_query",
+		"search",
+	)
+	required := schema["required"].([]string)
+	if !slices.Contains(required, "knowledge") {
+		t.Fatalf("top-level required fields = %#v, want knowledge", required)
+	}
+	properties := schema["properties"].(map[string]interface{})
+	intentType := properties["type"].(map[string]interface{})
+	if got := intentType["enum"].([]string); len(got) != 1 || got[0] != "knowledge_query" {
+		t.Fatalf("intent type enum = %#v", got)
+	}
+	knowledge := properties["knowledge"].(map[string]interface{})
+	knowledgeProperties := knowledge["properties"].(map[string]interface{})
+	operation := knowledgeProperties["operation"].(map[string]interface{})
+	if got := operation["enum"].([]string); len(got) != 1 || got[0] != "search" {
+		t.Fatalf("operation enum = %#v", got)
+	}
+}
+
 func TestParseReceiptIntentResponseRejectsKnowledgeAndQueryWithoutFilters(t *testing.T) {
 	if _, err := parseReceiptIntentResponse(`{"type":"knowledge_write"}`); err == nil {
 		t.Fatal("knowledge intent unexpectedly accepted by receipt parser")

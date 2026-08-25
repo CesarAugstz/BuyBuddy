@@ -3,6 +3,7 @@ package utils
 import (
 	"buybuddy-api/models"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -11,6 +12,14 @@ import (
 
 	"google.golang.org/genai"
 )
+
+var knowledgeIntentOperations = map[string]string{
+	"knowledge_write":    "create",
+	"knowledge_query":    "search",
+	"knowledge_change":   "update",
+	"knowledge_forget":   "delete",
+	"knowledge_organize": "organize",
+}
 
 func buildKnowledgeIntentPrompt(question string, conversationHistory []models.ChatMessage, knowledgeContext *models.KnowledgeAssistantContext, currentTime time.Time) string {
 	contextJSON := `{"topics":[],"entries":[]}`
@@ -105,17 +114,10 @@ func parseKnowledgeIntentResponse(response string) (*models.KnowledgeAssistantIn
 	if err := json.Unmarshal([]byte(response), &intent); err != nil {
 		return nil, fmt.Errorf("failed to parse knowledge intent response: %w", err)
 	}
-	expectedOperations := map[string]string{
-		"knowledge_write":    "create",
-		"knowledge_query":    "search",
-		"knowledge_change":   "update",
-		"knowledge_forget":   "delete",
-		"knowledge_organize": "organize",
-	}
 	if intent.Type == "direct" {
 		return &intent, nil
 	}
-	expectedOperation, ok := expectedOperations[intent.Type]
+	expectedOperation, ok := knowledgeIntentOperations[intent.Type]
 	if !ok {
 		return nil, fmt.Errorf("unsupported knowledge assistant intent type %q", intent.Type)
 	}
@@ -149,19 +151,62 @@ func DetectKnowledgeIntent(ctx context.Context, question string, conversationHis
 		})
 		if generateErr != nil {
 			lastErr = fmt.Errorf("failed to generate knowledge intent: %w", generateErr)
+			log.Printf(
+				"Knowledge intent attempt %d/2 generation failed: %v",
+				attempt+1,
+				generateErr,
+			)
 			continue
 		}
 		text, ok := firstCandidateText(response)
 		if !ok {
 			lastErr = fmt.Errorf("empty response from model")
+			log.Printf("Knowledge intent attempt %d/2 returned no text", attempt+1)
 			continue
 		}
 
+		diagnostic := inspectKnowledgeIntentResponse(text)
+		log.Printf(
+			"Knowledge intent attempt %d/2 response: chars=%d fingerprint=%s type=%q confidence=%q operation=%q hasKnowledge=%t entryIdPresent=%t topicIdPresent=%t searchQueryChars=%d",
+			attempt+1,
+			len([]rune(text)),
+			diagnostic.Fingerprint,
+			diagnostic.Type,
+			diagnostic.Confidence,
+			diagnostic.Operation,
+			diagnostic.HasKnowledge,
+			diagnostic.EntryIDPresent,
+			diagnostic.TopicIDPresent,
+			diagnostic.SearchQueryChars,
+		)
 		intent, parseErr := parseKnowledgeIntentResponse(text)
 		if parseErr == nil {
+			log.Printf(
+				"Knowledge intent accepted on attempt %d: type=%q operation=%q confidence=%q",
+				attempt+1,
+				intent.Type,
+				diagnostic.Operation,
+				intent.Confidence,
+			)
 			return intent, nil
 		}
 		lastErr = parseErr
+		log.Printf(
+			"Knowledge intent attempt %d/2 rejected: %v",
+			attempt+1,
+			parseErr,
+		)
+		if expectedOperation, recognized := knowledgeIntentOperations[diagnostic.Type]; recognized {
+			schema = knowledgeAssistantIntentCorrectionJSONSchema(
+				diagnostic.Type,
+				expectedOperation,
+			)
+			log.Printf(
+				"Knowledge intent correction constrained to type=%q operation=%q",
+				diagnostic.Type,
+				expectedOperation,
+			)
+		}
 		attemptPrompt = fmt.Sprintf(`%s
 
 Your previous JSON response was invalid:
@@ -173,17 +218,76 @@ Return only a complete corrected JSON object using one allowed knowledge-only ty
 	return nil, fmt.Errorf("failed after 2 attempts: %w", lastErr)
 }
 
+type knowledgeIntentDiagnostic struct {
+	Type             string
+	Confidence       string
+	Operation        string
+	HasKnowledge     bool
+	EntryIDPresent   bool
+	TopicIDPresent   bool
+	SearchQueryChars int
+	Fingerprint      string
+}
+
+func inspectKnowledgeIntentResponse(response string) knowledgeIntentDiagnostic {
+	sum := sha256.Sum256([]byte(response))
+	diagnostic := knowledgeIntentDiagnostic{
+		Fingerprint: fmt.Sprintf("%x", sum[:6]),
+	}
+	var envelope struct {
+		Type       string `json:"type"`
+		Confidence string `json:"confidence"`
+		Knowledge  *struct {
+			Operation   string `json:"operation"`
+			EntryID     string `json:"entryId"`
+			TopicID     string `json:"topicId"`
+			SearchQuery string `json:"searchQuery"`
+		} `json:"knowledge"`
+	}
+	if err := json.Unmarshal([]byte(response), &envelope); err != nil {
+		return diagnostic
+	}
+	diagnostic.Type = envelope.Type
+	diagnostic.Confidence = envelope.Confidence
+	diagnostic.HasKnowledge = envelope.Knowledge != nil
+	if envelope.Knowledge != nil {
+		diagnostic.Operation = envelope.Knowledge.Operation
+		diagnostic.EntryIDPresent = strings.TrimSpace(envelope.Knowledge.EntryID) != ""
+		diagnostic.TopicIDPresent = strings.TrimSpace(envelope.Knowledge.TopicID) != ""
+		diagnostic.SearchQueryChars = len([]rune(envelope.Knowledge.SearchQuery))
+	}
+	return diagnostic
+}
+
 func knowledgeAssistantIntentJSONSchema() map[string]interface{} {
+	return knowledgeAssistantIntentSchema(nil, "")
+}
+
+func knowledgeAssistantIntentCorrectionJSONSchema(
+	intentType,
+	operation string,
+) map[string]interface{} {
+	return knowledgeAssistantIntentSchema(&intentType, operation)
+}
+
+func knowledgeAssistantIntentSchema(
+	requiredIntentType *string,
+	requiredOperation string,
+) map[string]interface{} {
 	stringArray := map[string]interface{}{
 		"type":     "array",
 		"maxItems": 20,
 		"items":    map[string]interface{}{"type": "string"},
 	}
+	operationValues := []string{"create", "search", "update", "delete", "organize"}
+	if requiredOperation != "" {
+		operationValues = []string{requiredOperation}
+	}
 	knowledgeAction := map[string]interface{}{
 		"type":                 "object",
 		"additionalProperties": false,
 		"properties": map[string]interface{}{
-			"operation":       map[string]interface{}{"type": "string", "enum": []string{"create", "search", "update", "delete", "organize"}},
+			"operation":       map[string]interface{}{"type": "string", "enum": operationValues},
 			"entryId":         map[string]interface{}{"type": "string"},
 			"expectedVersion": map[string]interface{}{"type": "integer", "minimum": 1},
 			"topicId":         map[string]interface{}{"type": "string"},
@@ -200,18 +304,24 @@ func knowledgeAssistantIntentJSONSchema() map[string]interface{} {
 		},
 		"required": []string{"operation"},
 	}
+	intentValues := []string{"direct", "knowledge_write", "knowledge_query", "knowledge_change", "knowledge_forget", "knowledge_organize"}
+	requiredFields := []string{"type"}
+	if requiredIntentType != nil {
+		intentValues = []string{*requiredIntentType}
+		requiredFields = append(requiredFields, "knowledge")
+	}
 	return map[string]interface{}{
 		"type":                 "object",
 		"additionalProperties": false,
 		"properties": map[string]interface{}{
 			"type": map[string]interface{}{
 				"type": "string",
-				"enum": []string{"direct", "knowledge_write", "knowledge_query", "knowledge_change", "knowledge_forget", "knowledge_organize"},
+				"enum": intentValues,
 			},
 			"answer":     map[string]interface{}{"type": "string"},
 			"confidence": map[string]interface{}{"type": "string", "enum": []string{"high", "medium", "low"}},
 			"knowledge":  knowledgeAction,
 		},
-		"required": []string{"type"},
+		"required": requiredFields,
 	}
 }
