@@ -121,6 +121,37 @@ void main() {
     await tester.tap(find.text('Retry'));
     expect(retryCalls, 0);
   });
+
+  testWidgets('suggestion reopens the keyboard and selects its placeholder', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: AssistantChatPage(
+          title: 'Test Assistant',
+          state: const ChatState(),
+          suggestions: const ['Where did I buy {item}?'],
+          inputHint: 'Ask...',
+          onSend: (_) async {},
+          onRetry: (_) async {},
+          onClear: () async {},
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('Where did I buy {item}?'));
+    await tester.pump();
+
+    final field = tester.widget<TextField>(
+      find.byKey(const Key('assistant-message-field')),
+    );
+    expect(field.controller!.text, 'Where did I buy {item}?');
+    expect(
+      field.controller!.selection.textInside(field.controller!.text),
+      '{item}',
+    );
+    expect(tester.testTextInput.isVisible, isTrue);
+  });
 }
 
 class _NavigationAssistantApi implements AssistantChatApi {

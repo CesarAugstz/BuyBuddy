@@ -83,6 +83,11 @@ class _AssistantChatPageState extends State<AssistantChatPage> {
               extentOffset: placeholder.end,
             );
     _messageFocusNode.requestFocus();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _messageFocusNode.requestFocus();
+      SystemChannels.textInput.invokeMethod<void>('TextInput.show');
+    });
   }
 
   @override
